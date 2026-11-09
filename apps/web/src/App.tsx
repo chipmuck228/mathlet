@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useState } from "react"
-import { BookOpen, Check, FileCheck2, Files, GitBranch, Loader2, MessageSquare, Package, Plus, RefreshCw, Upload } from "lucide-react"
+import { BookOpen, Check, FileCheck2, Files, GitBranch, ListTree, Loader2, MessageSquare, Package, Plus, RefreshCw, Upload } from "lucide-react"
+import PlanningPage from "./PlanningPage"
 import { Button } from "@/components/ui/button"
 import { api, json, type Block, type Comment, type Document, type Draft, type Job, type Release } from "@/lib/api"
 
 const stages = [
   { id: "materials", label: "资料包", icon: Files },
   { id: "sources", label: "原题核对", icon: FileCheck2 },
+  { id: "planning", label: "内容规划", icon: ListTree },
   { id: "tasks", label: "任务与生成", icon: GitBranch },
   { id: "editor", label: "编辑与评审", icon: MessageSquare },
   { id: "preview", label: "小册子预览", icon: BookOpen },
@@ -111,6 +113,7 @@ export default function App() {
   const [documentId, setDocumentId] = useState("")
   const [blocks, setBlocks] = useState<Block[]>([])
   const [blockId, setBlockId] = useState("")
+  const [requestedBlockId, setRequestedBlockId] = useState("")
   const [draftId, setDraftId] = useState("")
   const [selected, setSelected] = useState<string[]>([])
   const [category, setCategory] = useState("unknown")
@@ -134,10 +137,10 @@ export default function App() {
     let active = true
     setBlocks([]); setBlockId(""); setSelected([])
     if (documentId) api<Block[]>(`/documents/${documentId}/blocks`).then(b => {
-      if (active) { setBlocks(b); setBlockId(b[0]?.id || "") }
+      if (active) { setBlocks(b); setBlockId(b.find(x => x.id === requestedBlockId)?.id || b[0]?.id || "") }
     }).catch(e => { if (active) setMessage(String(e)) })
     return () => { active = false }
-  }, [documentId, docStatus])
+  }, [documentId, docStatus, requestedBlockId])
   async function upload(files: FileList | null) {
     if (!files?.length) return
     setBusy(true); setMessage("")
@@ -168,7 +171,7 @@ export default function App() {
     } catch (e) { setMessage(String(e)) } finally { setBusy(false) }
   }
   function navigate(next: string) {
-    if (stage === "editor" && next !== stage && !window.confirm("离开编辑页前，请确认修改已经保存。继续切换？")) return
+    if (["editor", "planning"].includes(stage) && next !== stage && !window.confirm("离开前，请确认修改已经保存。继续切换？")) return
     setStage(next); setMessage("")
   }
   const draftPicker = <select aria-label="选择小册子单元" value={draftId} onChange={e => { if (stage !== "editor" || window.confirm("请确认已保存当前单元。继续切换？")) setDraftId(e.target.value) }}><option value="">选择一个单元</option>{drafts.map(d => <option key={d.id} value={d.id}>{d.title} · 修订 {d.revision}</option>)}</select>
@@ -176,8 +179,8 @@ export default function App() {
     <aside className="sidebar"><a className="brand" href="/">mathlet<span>数学小册子编辑工作台</span></a>
       <div className="sidebar-caption">内容生产</div><nav aria-label="工作区">{stages.map(({ id, label, icon: Icon }, i) => <button key={id} className={stage === id ? "active" : ""} onClick={() => navigate(id)} aria-current={stage === id ? "page" : undefined}><Icon size={17} /><span>{label}</span><small>0{i + 1}</small></button>)}</nav>
       <div className="sidebar-footer"><span className={online ? "dot online" : "dot"} />{online ? "本地服务已连接" : "等待本地 API"}<p>资料留存在本机<br />代码通过 GitHub 管理</p></div></aside>
-    <div className="workspace"><header className="workspace-header"><span>Mathlet / {stages.find(s => s.id === stage)?.label}</span><span className="label">本地版 · 0.1</span></header>
-      <main><div className="intro"><div><p className="eyebrow">理解知识 · 发现连接 · 建立思路</p><h1>{({ materials: "从可信资料开始。", sources: "让每个条件都准确。", tasks: "把生成过程留在记录里。", editor: "让思路经得起检查。", preview: "回到学生的阅读视角。", releases: "交付一个确定的版本。" } as Record<string, string>)[stage]}</h1></div><Button variant="outline" size="sm" onClick={() => void refresh()}><RefreshCw />刷新列表</Button></div>
+    <div className="workspace"><header className="workspace-header"><span>Mathlet / {stages.find(s => s.id === stage)?.label}</span><span className="label">本地版 · 0.2</span></header>
+      <main><div className="intro"><div><p className="eyebrow">理解知识 · 发现连接 · 建立思路</p><h1>{({ materials: "从可信资料开始。", sources: "让每个条件都准确。", planning: "把知识组织成复习路径。", tasks: "把生成过程留在记录里。", editor: "让思路经得起检查。", preview: "回到学生的阅读视角。", releases: "交付一个确定的版本。" } as Record<string, string>)[stage]}</h1></div><Button variant="outline" size="sm" onClick={() => void refresh()}><RefreshCw />刷新列表</Button></div>
       {!online && <div className="notice" role="alert">尚未连接 API。请按 README 启动 FastAPI（8000）和 Worker；前端通过 Vite 代理访问。</div>}
       <Message value={message} />
       {stage === "materials" && <>
@@ -192,6 +195,7 @@ export default function App() {
         {blocks.length > 0 && <><div className="block-selector">{blocks.filter(b => b.text.includes(query)).map(b => <button key={b.id} className={b.id === blockId ? "selected" : ""} onClick={() => { if (b.id === blockId || window.confirm("请确认当前内容已保存。继续切换？")) setBlockId(b.id) }}><span>{b.verified ? "✓ " : ""}{b.locator}</span><small>{b.text.slice(0, 35) || "图片内容"}</small></button>)}</div>{block && <SourceEditor key={block.id} block={block} onSaved={b => { setBlocks(old => old.map(x => x.id === b.id ? b : x)); void refresh() }} />}</>}
         {!document && <div className="empty"><FileCheck2 /><p>先选择一份资料，再对照原件逐块核对。DOCX 按段落／表格分块，PDF 按页分块。</p></div>}
       </>}
+      {stage === "planning" && <PlanningPage documents={documents} openSource={(doc, block) => { setRequestedBlockId(block); setDocumentId(doc); setStage("sources") }} openDraft={d => { setDraftId(d.id); void refresh(); setStage("editor") }} />}
       {stage === "tasks" && <>
         <div className="notice">本阶段自动执行真实文件读取。数学 Agent、OCR 和自动分题尚未接入；“创建提纲”只组织人工已确认的来源，不生成解答。</div>
         <section className="surface"><h2>文件读取任务</h2>{jobs.length ? jobs.map(j => <div className="job" key={j.id}><div><h3>{j.name}</h3><p className="muted small">{j.message}</p></div><span className="label">{statuses[j.status]}</span>{j.status === "failed" && <Button variant="outline" size="sm" onClick={async () => { try { await api(`/jobs/${j.id}/retry`, { method: "POST" }); await refresh() } catch (e) { setMessage(String(e)) } }}>重试</Button>}</div>) : <p className="muted">上传资料后，任务会保存在本机数据库中。</p>}</section>

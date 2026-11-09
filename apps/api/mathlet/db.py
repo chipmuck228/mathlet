@@ -72,6 +72,23 @@ def init_db():
           revision INTEGER NOT NULL, snapshot TEXT NOT NULL, created_at TEXT NOT NULL
         );
         """)
+        # Additive, idempotent migration: preserve all existing 0.1 records.
+        c.executescript("""
+        CREATE TABLE IF NOT EXISTS schema_migrations (
+          version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS plans (
+          id TEXT PRIMARY KEY, title TEXT NOT NULL, payload TEXT NOT NULL,
+          revision INTEGER NOT NULL DEFAULT 1, confirmed_revision INTEGER,
+          reviewer TEXT, created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS plan_draft_links (
+          plan_id TEXT NOT NULL REFERENCES plans(id), unit_id TEXT NOT NULL,
+          draft_id TEXT NOT NULL REFERENCES drafts(id), plan_revision INTEGER NOT NULL,
+          PRIMARY KEY(plan_id,unit_id)
+        );
+        """)
+        c.execute("INSERT OR IGNORE INTO schema_migrations VALUES(1,?)", (now(),))
 
 
 def block_json(row):

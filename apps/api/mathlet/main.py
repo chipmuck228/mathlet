@@ -21,7 +21,7 @@ async def lifespan(_):
     yield
 
 
-app = FastAPI(title="Mathlet", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Mathlet", version="0.2.0", lifespan=lifespan)
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1", "testserver"])
 ALLOWED_ORIGINS = {f"http://{host}:{port}" for host in ("localhost", "127.0.0.1") for port in (5173, 8000)}
 
@@ -51,7 +51,7 @@ def require_revision(row, revision):
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "version": "0.1.0", "generation_mode": "editorial_scaffold", "model_connected": False}
+    return {"ok": True, "version": "0.2.0", "generation_mode": "editorial_scaffold", "model_connected": False}
 
 
 @app.get("/api/documents")
@@ -147,9 +147,18 @@ def edit_block(block_id: str, body: BlockEdit):
         old = get_row(c, "blocks", block_id)
         require_revision(old, body.revision)
         c.execute("UPDATE blocks SET text=?,verified=?,revision=revision+1 WHERE id=?", (body.text, int(body.verified), block_id))
+        affected = set()
         for draft in c.execute("SELECT id,source_ids FROM drafts").fetchall():
             if block_id in json.loads(draft["source_ids"]):
-                c.execute("UPDATE drafts SET revision=revision+1,approved_revision=NULL,reviewer=NULL WHERE id=?", (draft["id"],))
+                affected.add(draft["id"])
+        for plan in c.execute("SELECT id,payload FROM plans").fetchall():
+            payload = json.loads(plan["payload"])
+            is_requirement = any(r["source_id"] == block_id for r in payload["requirements"])
+            if block_id in payload["source_revisions"] and (body.text != old["text"] or (is_requirement and not body.verified)):
+                c.execute("UPDATE plans SET confirmed_revision=NULL,reviewer=NULL WHERE id=?", (plan["id"],))
+                affected.update(r["draft_id"] for r in c.execute("SELECT draft_id FROM plan_draft_links WHERE plan_id=?", (plan["id"],)))
+        for draft_id in affected:
+            c.execute("UPDATE drafts SET revision=revision+1,approved_revision=NULL,reviewer=NULL WHERE id=?", (draft_id,))
         return block_json(get_row(c, "blocks", block_id))
 
 
@@ -311,6 +320,9 @@ def download_release(release_id: str):
         row = get_row(c, "releases", release_id)
         return HTMLResponse(render_book(json.loads(row["snapshot"])), headers={"Content-Disposition": f'attachment; filename="mathlet-{release_id[:8]}.html"'})
 
+
+from .planning import router as planning_router
+app.include_router(planning_router)
 
 web = ROOT / "apps" / "web" / "dist"
 if web.is_dir():
