@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { BookOpen, Check, FileCheck2, Files, GitBranch, ListTree, Loader2, MessageSquare, Package, Plus, RefreshCw, Upload } from "lucide-react"
 import PlanningPage from "./PlanningPage"
+import ContinuousReview from "./ContinuousReview"
 import { Button } from "@/components/ui/button"
 import { api, json, type Block, type Comment, type Document, type Draft, type Job, type Release } from "@/lib/api"
 
@@ -18,40 +19,6 @@ const categories = { unknown: "待分类", standard: "课标／考纲", textbook
 
 function date(value: string) { return new Date(value).toLocaleString("zh-CN") }
 function Message({ value }: { value: string }) { return value ? <p className="feedback" role="status">{value}</p> : null }
-
-function SourceEditor({ block, onSaved }: { block: Block; onSaved: (b: Block) => void }) {
-  const [current, setCurrent] = useState(block)
-  const [text, setText] = useState(block.text)
-  const [confirmed, setConfirmed] = useState(block.verified)
-  const [message, setMessage] = useState("")
-  const [busy, setBusy] = useState(false)
-  async function save() {
-    setBusy(true)
-    try {
-      const result = await api<Block>(`/blocks/${block.id}`, json("PUT", { revision: current.revision, text, verified: confirmed }))
-      setCurrent(result); onSaved(result); setMessage("已保存。关联草稿的旧审核已撤销；原始证据仍保留。")
-    } catch (e) { setMessage(String(e)) } finally { setBusy(false) }
-  }
-  return <div className="two-column">
-    <section className="surface min-w-0">
-      <div className="section-heading"><h2>原件提取预览</h2><span className="label">{block.locator}</span></div>
-      <p className="muted small">DOCX 为结构预览，PDF 为原页图。此处始终保留最初提取结果，不随人工文字修正而改变。</p>
-      <div className="source-preview" dangerouslySetInnerHTML={{ __html: block.preview }} />
-      {block.assets.map(name => <img className="source-image" key={name} src={`/api/documents/${block.document_id}/assets/${name}`} alt={`${block.locator} 原件配图或页面`} />)}
-      <div className="warnings">{block.warnings.map(w => <p key={w}>{w}</p>)}</div>
-      <Button variant="outline" asChild><a href={`/api/documents/${block.document_id}/original`}>下载原件核对</a></Button>
-    </section>
-    <section className="surface min-w-0">
-      <div className="section-heading"><h2>核对与修正</h2><span className="label">修订 {current.revision}</span></div>
-      <p className="muted small">纯文字会丢失分数等公式结构。请对照左侧与原件，必要时手工改写为明确的形式，例如 k/x。确认的是当前文本与配图的组合。</p>
-      <label htmlFor="source-text">经核对的题干／内容</label>
-      <textarea id="source-text" className="source-input" value={text} onChange={e => { setText(e.target.value); setConfirmed(false) }} />
-      <label className="checkline"><input type="checkbox" checked={confirmed} onChange={e => setConfirmed(e.target.checked)} />我已核对条件、公式、点名、图表及内容完整性</label>
-      <Button onClick={save} disabled={busy}>{busy ? <Loader2 className="animate-spin" /> : <Check />}保存核对结果</Button>
-      <Message value={message} />
-    </section>
-  </div>
-}
 
 function DraftEditor({ draft, onSaved }: { draft: Draft; onSaved: () => void }) {
   const [base, setBase] = useState(draft)
@@ -112,13 +79,12 @@ export default function App() {
   const [releases, setReleases] = useState<Release[]>([])
   const [documentId, setDocumentId] = useState("")
   const [blocks, setBlocks] = useState<Block[]>([])
-  const [blockId, setBlockId] = useState("")
+  const [sourceDirty, setSourceDirty] = useState(false)
   const [requestedBlockId, setRequestedBlockId] = useState("")
   const [draftId, setDraftId] = useState("")
   const [selected, setSelected] = useState<string[]>([])
   const [category, setCategory] = useState("unknown")
   const [title, setTitle] = useState("")
-  const [query, setQuery] = useState("")
   const [message, setMessage] = useState("")
   const [busy, setBusy] = useState(false)
   const [online, setOnline] = useState(false)
@@ -131,13 +97,12 @@ export default function App() {
   useEffect(() => { void refresh(); const id = setInterval(() => void refresh(), 3000); return () => clearInterval(id) }, [refresh])
   const document = documents.find(d => d.id === documentId)
   const draft = drafts.find(d => d.id === draftId)
-  const block = blocks.find(b => b.id === blockId)
   const docStatus = document?.status
   useEffect(() => {
     let active = true
-    setBlocks([]); setBlockId(""); setSelected([])
+    setBlocks([]); setSourceDirty(false); setSelected([])
     if (documentId) api<Block[]>(`/documents/${documentId}/blocks`).then(b => {
-      if (active) { setBlocks(b); setBlockId(b.find(x => x.id === requestedBlockId)?.id || b[0]?.id || "") }
+      if (active) { setBlocks(b) }
     }).catch(e => { if (active) setMessage(String(e)) })
     return () => { active = false }
   }, [documentId, docStatus, requestedBlockId])
@@ -171,6 +136,7 @@ export default function App() {
     } catch (e) { setMessage(String(e)) } finally { setBusy(false) }
   }
   function navigate(next: string) {
+    if (stage === "sources" && sourceDirty && next !== stage && !window.confirm("有未保存的核对修改，离开将丢弃这些修改。继续？")) return
     if (["editor", "planning"].includes(stage) && next !== stage && !window.confirm("离开前，请确认修改已经保存。继续切换？")) return
     setStage(next); setMessage("")
   }
@@ -190,12 +156,12 @@ export default function App() {
         <p className="muted small mt-6">原件、数据库和交付文件位于本地 data 目录，默认不会进入 Git。当前版本未接入模型或外部 OCR，不会自动发送资料。</p>
       </>}
       {stage === "sources" && <>
-        <div className="actions mb-5"><select aria-label="选择资料" value={documentId} onChange={e => { if (!block || window.confirm("请确认核对修改已保存。继续切换？")) setDocumentId(e.target.value) }}><option value="">选择资料</option>{documents.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select><input className="search" aria-label="筛选内容块" value={query} onChange={e => setQuery(e.target.value)} placeholder="查找题号或文字…" /></div>
+        <div className="actions mb-5"><select aria-label="选择资料" value={documentId} onChange={e => { if (!sourceDirty || window.confirm("有未保存的核对修改，切换将丢弃。继续？")) { setRequestedBlockId(""); setDocumentId(e.target.value) } }}><option value="">选择资料</option>{documents.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></div>
         {document && docStatus !== "ready" && <div className="notice">资料状态：{statuses[docStatus || ""]}。请查看任务页了解读取进度。</div>}
-        {blocks.length > 0 && <><div className="block-selector">{blocks.filter(b => b.text.includes(query)).map(b => <button key={b.id} className={b.id === blockId ? "selected" : ""} onClick={() => { if (b.id === blockId || window.confirm("请确认当前内容已保存。继续切换？")) setBlockId(b.id) }}><span>{b.verified ? "✓ " : ""}{b.locator}</span><small>{b.text.slice(0, 35) || "图片内容"}</small></button>)}</div>{block && <SourceEditor key={block.id} block={block} onSaved={b => { setBlocks(old => old.map(x => x.id === b.id ? b : x)); void refresh() }} />}</>}
-        {!document && <div className="empty"><FileCheck2 /><p>先选择一份资料，再对照原件逐块核对。DOCX 按段落／表格分块，PDF 按页分块。</p></div>}
+        {document && blocks.length > 0 && <ContinuousReview key={documentId} blocks={blocks} documentId={documentId} kind={document.kind} focusId={requestedBlockId} onDirtyChange={setSourceDirty} onSaved={saved => { const updates = new Map(saved.map(b => [b.id, b])); setBlocks(old => old.map(b => updates.get(b.id) || b)); void refresh() }} />}
+        {!document && <div className="empty"><FileCheck2 /><p>选择资料，连续阅读并编辑左侧内容，右侧对照原始证据。</p></div>}
       </>}
-      {stage === "planning" && <PlanningPage documents={documents} openSource={(doc, block) => { setBlockId(block); setRequestedBlockId(block); setDocumentId(doc); setStage("sources") }} openDraft={d => { setDraftId(d.id); void refresh(); setStage("editor") }} />}
+      {stage === "planning" && <PlanningPage documents={documents} openSource={(doc, block) => { setRequestedBlockId(block); setDocumentId(doc); setStage("sources") }} openDraft={d => { setDraftId(d.id); void refresh(); setStage("editor") }} />}
       {stage === "tasks" && <>
         <div className="notice">本阶段自动执行真实文件读取。数学 Agent、OCR 和自动分题尚未接入；“创建提纲”只组织人工已确认的来源，不生成解答。</div>
         <section className="surface"><h2>文件读取任务</h2>{jobs.length ? jobs.map(j => <div className="job" key={j.id}><div><h3>{j.name}</h3><p className="muted small">{j.message}</p></div><span className="label">{statuses[j.status]}</span>{j.status === "failed" && <Button variant="outline" size="sm" onClick={async () => { try { await api(`/jobs/${j.id}/retry`, { method: "POST" }); await refresh() } catch (e) { setMessage(String(e)) } }}>重试</Button>}</div>) : <p className="muted">上传资料后，任务会保存在本机数据库中。</p>}</section>

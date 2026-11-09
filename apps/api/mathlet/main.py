@@ -140,26 +140,60 @@ class BlockEdit(BaseModel):
     verified: bool
 
 
+def apply_block_edits(c, changes):
+    """Validate the entire range before writing; invalidate each dependent once."""
+    old_rows = {}
+    for key, body in changes:
+        old = get_row(c, "blocks", key)
+        require_revision(old, body.revision)
+        old_rows[key] = old
+    for key, body in changes:
+        c.execute("UPDATE blocks SET text=?,verified=?,revision=revision+1 WHERE id=?", (body.text, int(body.verified), key))
+    keys = set(old_rows)
+    affected = set()
+    for draft in c.execute("SELECT id,source_ids FROM drafts").fetchall():
+        if keys.intersection(json.loads(draft["source_ids"])):
+            affected.add(draft["id"])
+    for plan in c.execute("SELECT id,payload FROM plans").fetchall():
+        payload = json.loads(plan["payload"])
+        requirements = {r["source_id"] for r in payload["requirements"]}
+        if any(key in payload["source_revisions"] and
+               (body.text != old_rows[key]["text"] or (key in requirements and not body.verified))
+               for key, body in changes):
+            c.execute("UPDATE plans SET confirmed_revision=NULL,reviewer=NULL WHERE id=?", (plan["id"],))
+            affected.update(r["draft_id"] for r in c.execute("SELECT draft_id FROM plan_draft_links WHERE plan_id=?", (plan["id"],)))
+    for draft_id in affected:
+        c.execute("UPDATE drafts SET revision=revision+1,approved_revision=NULL,reviewer=NULL WHERE id=?", (draft_id,))
+    return [block_json(get_row(c, "blocks", key)) for key, _ in changes]
+
+
 @app.put("/api/blocks/{block_id}")
 def edit_block(block_id: str, body: BlockEdit):
     with connect() as c:
         c.execute("BEGIN IMMEDIATE")
-        old = get_row(c, "blocks", block_id)
-        require_revision(old, body.revision)
-        c.execute("UPDATE blocks SET text=?,verified=?,revision=revision+1 WHERE id=?", (body.text, int(body.verified), block_id))
-        affected = set()
-        for draft in c.execute("SELECT id,source_ids FROM drafts").fetchall():
-            if block_id in json.loads(draft["source_ids"]):
-                affected.add(draft["id"])
-        for plan in c.execute("SELECT id,payload FROM plans").fetchall():
-            payload = json.loads(plan["payload"])
-            is_requirement = any(r["source_id"] == block_id for r in payload["requirements"])
-            if block_id in payload["source_revisions"] and (body.text != old["text"] or (is_requirement and not body.verified)):
-                c.execute("UPDATE plans SET confirmed_revision=NULL,reviewer=NULL WHERE id=?", (plan["id"],))
-                affected.update(r["draft_id"] for r in c.execute("SELECT draft_id FROM plan_draft_links WHERE plan_id=?", (plan["id"],)))
-        for draft_id in affected:
-            c.execute("UPDATE drafts SET revision=revision+1,approved_revision=NULL,reviewer=NULL WHERE id=?", (draft_id,))
-        return block_json(get_row(c, "blocks", block_id))
+        return apply_block_edits(c, [(block_id, body)])[0]
+
+
+class RangeBlockEdit(BlockEdit):
+    id: str
+
+
+class RangeReview(BaseModel):
+    changes: list[RangeBlockEdit] = Field(min_length=1, max_length=500)
+
+
+@app.put("/api/documents/{document_id}/blocks/review")
+def review_range(document_id: str, body: RangeReview):
+    with connect() as c:
+        c.execute("BEGIN IMMEDIATE")
+        get_row(c, "documents", document_id)
+        ids = [b.id for b in body.changes]
+        if len(ids) != len(set(ids)):
+            raise HTTPException(422, "同一范围不能包含重复来源块")
+        for key in ids:
+            if get_row(c, "blocks", key)["document_id"] != document_id:
+                raise HTTPException(422, "不能跨资料保存核对范围")
+        return apply_block_edits(c, [(b.id, b) for b in body.changes])
 
 
 class NewDraft(BaseModel):

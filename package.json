@@ -1,11 +1,16 @@
 {
   "name": "mathlet",
   "private": true,
-  "workspaces": ["apps/web"],
+  "workspaces": [
+    "apps/web"
+  ],
   "scripts": {
     "dev": "npm run dev --workspace apps/web",
     "build": "npm run build --workspace apps/web",
-    "typecheck": "npm run typecheck --workspace apps/web"
+    "typecheck": "npm run typecheck --workspace apps/web",
+    "test": "npm run test --workspace apps/web"
   },
-  "engines": { "node": ">=22.12.0" }
+  "engines": {
+    "node": ">=22.12.0"
+  }
 }

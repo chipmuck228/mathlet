@@ -11,6 +11,6 @@
 - 保留原始证据与修正文本。公式转换不支持的结构要报出，不能猜括号或漏条件后当成功。
 - 前端不执行用户提供的 HTML。原件预览只允许自有安全转换器生成的标签。
 - 本地版 API 和 Worker 使用同一数据目录；单 Worker。不要未经设计引入远程监听、多实例 SQLite 写入方案。
-- 检查：`npm run build` 与 `.venv/bin/python -m pytest apps/api/tests -q`。
+- 检查：`npm run build`、`npm test` 与 `.venv/bin/python -m pytest apps/api/tests -q`。
 - 审核、来源修改或版本逻辑改变时，必须覆盖过期版本拒绝与旧交付不变。
 - 开发顺序及已知缺口见 docs/ROADMAP.md。完成后更新对应文档，避免将计划描述成现成功能。
