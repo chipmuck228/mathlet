@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mathlet-api"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115,<1", "uvicorn>=0.32,<1", "python-multipart>=0.0.20,<1",
+  "pydantic>=2.10,<3", "lxml>=5.3,<7", "pypdf>=5,<7",
+  "pypdfium2>=4.30,<6", "Pillow>=11,<13", "filelock>=3.16,<4"
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<10", "httpx>=0.28,<1"]
+
+[tool.setuptools.packages.find]
+include = ["mathlet*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

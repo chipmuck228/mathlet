@@ -1,5 +1,106 @@
 # Mathlet
 
-面向中考数学复习小册子的本地编辑与审核工作台。
+Mathlet 是用于中考数学复习小册子的本地编辑与审核工作台。学生最终拿到可留存的读物；工作台服务于资料整理、数学内容研究、教师审核与版本交付。
 
-初始实现与运行说明正在同一轮开发中补充。项目采用 React + TypeScript + Vite + Tailwind CSS + shadcn/ui 与 Python + FastAPI。
+**当前为 0.1 本地基础版：真实文件导入和审核流程已实现，数学 Agent 自动写作尚未接入。** 不需要 API Key，也不会将资料自动发送给模型。初始单元内容是编辑提纲，不是自动生成的解答。
+
+## 本地运行
+
+需要 Git、Python 3.11+、Node.js 22.12+（建议使用仍受支持的 LTS）。macOS/Linux：
+
+```bash
+git clone https://github.com/chipmuck228/mathlet.git
+cd mathlet
+python3 scripts/setup.py
+python3 scripts/dev.py
+```
+
+浏览器打开 **http://127.0.0.1:5173**。`Ctrl+C` 停止前端、API 与 Worker。
+
+Windows 可将上述 `python3` 替换为 `py`。启动脚本包含 Windows 分支，但本轮只在 Linux 验证，macOS/Windows 仍需本机验收。
+
+已有仓库更新：
+
+```bash
+git pull --ff-only
+python3 scripts/setup.py
+python3 scripts/dev.py
+```
+
+`setup.py` 建立项目内 `.venv`，安装 Python 依赖并执行 `npm ci`。第一次安装需要网络。不要把代理或密钥写进仓库。
+
+## 第一轮使用
+
+1. **资料包**：上传 DOCX 或 PDF，选择资料类别。文件保存在本机，Worker 执行实际读取。
+2. **原题核对**：选择内容块，对照公式预览、原图或 PDF 页面；需要时下载原件核对。修正纯文本，明确分数、上下标等结构，再勾选确认。
+3. **任务与生成**：从当前资料中选取已确认内容，创建小册子单元的编辑提纲。此步骤不会生成数学解答。
+4. **编辑与评审**：填写讲解、知识连接、可行思路、独立训练及答案。填写审核人并保存批注；每次正文保存产生新修订并撤销旧批准。
+5. **小册子预览**：打开已保存内容的阅读版，用浏览器打印功能另存 PDF。当前是简单排版，尚非专业分页出版版。
+6. **交付版本**：批准当前修订后创建不可变快照，下载含图像的离线 HTML。后续编辑不改变已保存版本。
+
+DOCX 按段落／表格分块，PDF 按页分块，**尚未自动分题**。一题跨多个内容块时可以组合选入单元；必须人工检查题干、续页、图表、答案之间的关系。
+
+你提供的模拟试卷不随代码分发。请在本机上传原文件。不要把原始试卷放进 Git 目录的可跟踪路径。
+
+## 已实现与边界
+
+| 能力 | 当前状态 |
+| --- | --- |
+| DOCX/PDF 上传与原件下载 | 已实现，单份最多30MB，PDF最多120页 |
+| DOCX 文本、部分原生公式、可解码图片、表格 | 已实现保守转换；复杂公式标记待核对 |
+| PDF 文本提取与页面图 | 已实现；不保证文字顺序或公式结构 |
+| 扫描件 OCR、自动分题、Word原页渲染 | 未实现；允许人工补录 |
+| 持久化任务、失败重试、Worker重启恢复 | 已实现；本地单 Worker |
+| 来源核对、编辑、批注、明确批准 | 已实现，带修订号冲突检查 |
+| 来源变更使下游批准失效 | 已实现；不自动重写下游正文 |
+| 交付快照、离线 HTML、浏览器打印 | 已实现 |
+| 完整修订差异视图、来源图上的框选定位 | 未实现 |
+| 模型调用、多 Agent 数学研究、自动核验 | 未实现，见阶段 B 设计 |
+| 动画、视频、二维码发布、互联网发布 | 未实现 |
+| 登录、多用户权限、远程访问 | 未实现，仅本机使用 |
+
+概念、性质和论证必须正确；示例路径可以多样。软件中的“已批准”记录人的确认，不代表程序证明了数学正确性。第一版允许编辑者批准内容，不提供教师资质验证或双人审批。
+
+## 数据保存与备份
+
+默认数据目录是仓库根目录 `data/`：
+
+- `mathlet.sqlite3`：资料、任务、核对状态、草稿、批注和版本快照。
+- `documents/<id>/original.*`：原始文件。
+- `documents/<id>/assets/`：提取图片或 PDF 页面图。
+
+可通过启动环境变量 `MATHLET_DATA_DIR` 指定**绝对路径**。API 和 Worker 必须使用同一目录。项目暂不自动读取 `.env`。
+
+**GitHub 只同步代码、设计、模板与测试，不备份工作数据。** `.gitignore` 排除资料、数据库和环境密钥。备份时先停止三个服务，再复制完整数据目录；恢复时保留原有目录结构。不要只复制运行中的 SQLite 主文件，也不要用 Git 同步两台机器正在使用的数据库。
+
+服务默认只监听 `127.0.0.1`，本版没有账户与权限系统。请勿改为公网或局域网服务。本地应用仍需对来源不明的大文件保持谨慎；解析尚未放入资源受限的隔离进程。
+
+## 开发与测试
+
+```bash
+npm run build
+.venv/bin/python -m pytest apps/api/tests -q
+```
+
+Windows 的 Python 路径为 `.venv\Scripts\python.exe`。
+
+分开运行时，在根目录开启三个终端：
+
+```bash
+.venv/bin/python -m uvicorn mathlet.main:app --host 127.0.0.1 --port 8000
+.venv/bin/python -m mathlet.worker
+npm run dev
+```
+
+API 文档：http://127.0.0.1:8000/docs 。已有前端构建时，也可以通过 http://127.0.0.1:8000 使用工作台；仍需单独启动 Worker。
+
+## 设计与后续开发
+
+- [产品与教学设计](docs/PRODUCT.md)
+- [架构与数据约定](docs/ARCHITECTURE.md)
+- [Agent 协作设计](docs/AGENTS_PIPELINE.md)
+- [分阶段计划与验收](docs/ROADMAP.md)
+- [本轮验证记录](docs/VALIDATION.md)
+- [第三方说明](THIRD_PARTY_NOTICES.md)
+
+技术栈：React、TypeScript、Vite、Tailwind CSS、仓库内可修改的 shadcn/ui Button 组件；Python、FastAPI、SQLite、独立 Worker。前端依赖通过 `package-lock.json` 固定，Python 安装使用已验证环境生成的 `apps/api/requirements.lock` 固定版本；跨操作系统仍需验收。
