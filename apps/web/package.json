@@ -7,13 +7,16 @@
     "dev": "vite --host 127.0.0.1",
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b",
-    "test": "vitest run"
+    "test": "vitest run",
+    "predev": "node ../../scripts/copy-math-assets.mjs",
+    "prebuild": "node ../../scripts/copy-math-assets.mjs"
   },
   "dependencies": {
     "@radix-ui/react-slot": "^1.2.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^0.468.0",
+    "mathlive": "^0.111.4",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "tailwind-merge": "^3.3.0"

@@ -89,13 +89,24 @@ def init_db():
         );
         """)
         c.execute("INSERT OR IGNORE INTO schema_migrations VALUES(1,?)", (now(),))
+        columns = {r[1] for r in c.execute("PRAGMA table_info(blocks)")}
+        if "original_content" not in columns:
+            c.execute("ALTER TABLE blocks ADD COLUMN original_content TEXT NOT NULL DEFAULT '[]'")
+        c.execute("""CREATE TABLE IF NOT EXISTS formula_candidates (
+          block_id TEXT PRIMARY KEY REFERENCES blocks(id), base_revision INTEGER NOT NULL,
+          text TEXT NOT NULL, original_content TEXT NOT NULL, created_at TEXT NOT NULL
+        )""")
+        c.execute("INSERT OR IGNORE INTO schema_migrations VALUES(2,?)", (now(),))
 
 
 def block_json(row):
+    from .formulas import parts_from_text
     result = dict(row)
     for key in ("assets", "warnings"):
         result[key] = json.loads(result[key])
     result["verified"] = bool(result["verified"])
+    result["original_content"] = json.loads(result.get("original_content", "[]"))
+    result["content"] = parts_from_text(result["text"])
     return result
 
 

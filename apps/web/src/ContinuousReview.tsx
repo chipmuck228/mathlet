@@ -1,22 +1,10 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Check, Save, Search } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { api, json, type Block } from "@/lib/api"
+import { api, json, type Block, type FormulaPart } from "@/lib/api"
+import MathBlockEditor from "./MathBlockEditor"
 
-function GrowingText({ text, label, disabled, onChange, onFocus }: { text: string; label: string; disabled: boolean; onChange: (text: string) => void; onFocus: () => void }) {
-  const ref = useRef<HTMLTextAreaElement>(null)
-  useLayoutEffect(() => {
-    const element = ref.current
-    if (!element) return
-    const size = () => { element.style.height = "auto"; element.style.height = `${element.scrollHeight + 2}px` }
-    size()
-    let width = element.clientWidth
-    const observer = new ResizeObserver(() => { if (element.clientWidth !== width) { width = element.clientWidth; size() } })
-    observer.observe(element)
-    return () => observer.disconnect()
-  }, [text])
-  return <textarea ref={ref} aria-label={label} value={text} disabled={disabled} onChange={e => onChange(e.target.value)} onFocus={onFocus} rows={1} className="continuous-text" />
-}
+type Candidate = { block_id: string; base_revision: number; text: string; content: FormulaPart[] }
 
 export default function ContinuousReview({ blocks, documentId, kind, focusId, onSaved, onDirtyChange }: {
   blocks: Block[]; documentId: string; kind: string; focusId: string;
@@ -31,6 +19,8 @@ export default function ContinuousReview({ blocks, documentId, kind, focusId, on
   const [query, setQuery] = useState("")
   const [message, setMessage] = useState("")
   const [busy, setBusy] = useState(false)
+  const [candidates, setCandidates] = useState<Candidate[]>([])
+  useEffect(() => { if (kind === "docx") void api<Candidate[]>(`/documents/${documentId}/formula-candidates`).then(setCandidates).catch(() => {}) }, [documentId, kind])
   const left = useRef(new Map<string, HTMLElement>())
   const right = useRef(new Map<string, HTMLElement>())
   const dirty = base.filter(b => texts[b.id] !== b.text)
@@ -61,6 +51,11 @@ export default function ContinuousReview({ blocks, documentId, kind, focusId, on
     locate(matches[(index + 1) % matches.length].id, true)
     setMessage(`找到 ${matches.length} 处，已定位下一处；没有隐藏其他内容。`)
   }
+  async function reextract() {
+    setBusy(true); setMessage("")
+    try { const result = await api<Candidate[]>(`/documents/${documentId}/formula-candidates`, { method: "POST" }); setCandidates(result); setMessage(`已生成 ${result.length} 个公式候选，没有覆盖当前正文。展开对应内容下的候选，对照后选择是否采用。`) }
+    catch (e) { setMessage(String(e)) } finally { setBusy(false) }
+  }
   function selectRange() {
     const start = base.findIndex(b => b.id === from), end = base.findIndex(b => b.id === to)
     setSelection(base.slice(Math.min(start, end), Math.max(start, end) + 1).map(b => b.id))
@@ -86,6 +81,7 @@ export default function ContinuousReview({ blocks, documentId, kind, focusId, on
   return <>
     <div className="review-toolbar surface">
       <div className="section-heading"><h2>连续核对</h2><span className="label">已核对 {base.filter(b => b.verified && texts[b.id] === b.text).length} / {base.length} 块</span></div>
+      {kind === "docx" && <div className="actions"><Button variant="outline" disabled={busy} onClick={reextract}>重新提取公式候选</Button><span className="small muted">旧资料从原件恢复结构；不会自动覆盖人工修改</span></div>}
       <div className="actions"><input aria-label="查找连续内容" className="search" value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => { if (e.key === "Enter") findNext() }} placeholder="查找题号或文字，不隐藏正文" /><Button variant="outline" onClick={findNext}><Search />定位下一处</Button><Button onClick={() => save(false)} disabled={busy || !dirty.length}><Save />保存修改（{dirty.length}）</Button></div>
       <div className="actions"><span className="small muted">确认范围</span><select aria-label="确认范围起点" value={from} onChange={e => setFrom(e.target.value)} disabled={busy}>{base.map(b => <option key={b.id} value={b.id}>{b.locator} · {b.text.slice(0, 16)}</option>)}</select><span>至</span><select aria-label="确认范围终点" value={to} onChange={e => setTo(e.target.value)} disabled={busy}>{base.map(b => <option key={b.id} value={b.id}>{b.locator} · {b.text.slice(0, 16)}</option>)}</select><Button variant="outline" disabled={busy} onClick={selectRange}>选择此范围</Button><Button variant="ghost" disabled={busy || !selection.length} onClick={() => setSelection([])}>清除选择</Button></div>
       <div className="actions"><span className="small">{selectionLabel}</span><Button onClick={() => save(true)} disabled={busy || !selection.length}><Check />保存并确认选中内容</Button></div>
@@ -94,11 +90,12 @@ export default function ContinuousReview({ blocks, documentId, kind, focusId, on
     </div>
     <div className="continuous-review">
       <section className="review-column" aria-label="待核对内容连续编辑">
-        <div className="review-column-title"><h2>待核对内容</h2><p>直接修改文字；原图保留，公式结构请对照右侧。</p></div>
+        <div className="review-column-title"><h2>待核对内容</h2><p>文字可直接修改；点击公式进行可视化编辑，也可插入公式。</p></div>
         <div className="review-scroll">
           {base.map(b => <article key={b.id} ref={e => { if (e) left.current.set(b.id, e); else left.current.delete(b.id) }} className={`review-block ${active === b.id ? "is-active" : ""}`}>
             <div className="review-block-meta"><label className="checkline"><input aria-label={`选择 ${b.locator}`} type="checkbox" checked={selection.includes(b.id)} disabled={busy} onChange={e => setSelection(old => e.target.checked ? [...old, b.id] : old.filter(id => id !== b.id))} />{b.locator}</label><span>{texts[b.id] !== b.text ? "未保存" : b.verified ? "已核对" : "待核对"}</span></div>
-            <GrowingText text={texts[b.id]} label={`待核对内容 ${b.locator}`} disabled={busy} onFocus={() => locate(b.id)} onChange={text => setTexts(old => ({ ...old, [b.id]: text }))} />
+            <MathBlockEditor block={b} text={texts[b.id]} disabled={busy} onFocus={() => locate(b.id)} onChange={text => setTexts(old => ({ ...old, [b.id]: text }))} />
+            {candidates.filter(c => c.block_id === b.id).map(c => <details key={c.block_id} className="formula-candidate"><summary>对照原件重新提取的公式候选</summary><p className="small muted">当前正文保留在上方。采用候选会替换本来源块的全部文字，请检查是否包含人工修订。</p><div className="candidate-reading">{c.content.map((p, i) => p.type === "math" && p.mathml ? <span key={i} dangerouslySetInnerHTML={{ __html: p.mathml }} /> : <span key={i}>{p.text || p.latex}</span>)}</div><Button variant="outline" size="sm" disabled={busy || c.base_revision !== b.revision} onClick={() => { if (window.confirm("采用候选将替换本块当前文字，尚不会保存。是否已对照并保留需要的人工修改？")) setTexts(old => ({ ...old, [b.id]: c.text })) }}>采用此候选到编辑区</Button>{c.base_revision !== b.revision && <p className="small muted">来源修订已变化，请重新提取。</p>}</details>)}
             {b.assets.map(name => <img key={name} className="review-asset" src={`/api/documents/${documentId}/assets/${name}`} alt={`${b.locator} 原始配图，当前不支持编辑`} loading="lazy" />)}
           </article>)}
         </div>

@@ -13,3 +13,5 @@ data/
 *.egg-info/
 *.tsbuildinfo
 outputs/
+
+apps/web/public/mathlive/

@@ -11,3 +11,5 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 Other dependencies retain their respective licenses and notices. User-uploaded exam papers and teaching materials are not included in this repository.
+
+MathLive (Copyright 2017–present Arno Gourdol) is used under its MIT license. The installed package's license is copied with the local editor assets to `public/mathlive/MathLive-LICENSE.txt` at build/development startup. The editor bundle and its bundled fonts are served locally. latex2mathml retains its upstream license in the installed package.

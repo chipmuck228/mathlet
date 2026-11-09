@@ -1,5 +1,6 @@
+export type FormulaPart = { type: "text" | "math"; text?: string; latex?: string; mathml?: string; error?: string | null }
 export type Document = { id: string; name: string; kind: string; category: string; status: string; created_at: string }
-export type Block = { id: string; document_id: string; locator: string; text: string; preview: string; assets: string[]; warnings: string[]; verified: boolean; revision: number }
+export type Block = { content?: FormulaPart[]; original_content?: unknown[]; id: string; document_id: string; locator: string; text: string; preview: string; assets: string[]; warnings: string[]; verified: boolean; revision: number }
 export type Job = { id: string; name: string; status: string; message: string; updated_at: string }
 export type Draft = { id: string; title: string; content: string; source_ids: string[]; revision: number; approved: boolean; reviewer: string | null }
 export type Comment = { id: string; revision: number; author: string; body: string; created_at: string }

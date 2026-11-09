@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .db import ROOT, block_json, connect, data_dir, draft_json, init_db, now, uid
+from .formulas import UNSUPPORTED, parts_from_text, render_text
 
 
 @asynccontextmanager
@@ -146,6 +147,13 @@ def apply_block_edits(c, changes):
     for key, body in changes:
         old = get_row(c, "blocks", key)
         require_revision(old, body.revision)
+        if body.verified:
+            if UNSUPPORTED in body.text or "，请合并核对】" in body.text:
+                raise HTTPException(422, "请先修正未转换公式及上下标提示，再确认此内容")
+            try:
+                parts_from_text(body.text, strict=True)
+            except ValueError as exc:
+                raise HTTPException(422, str(exc)) from exc
         old_rows[key] = old
     for key, body in changes:
         c.execute("UPDATE blocks SET text=?,verified=?,revision=revision+1 WHERE id=?", (body.text, int(body.verified), key))
@@ -279,6 +287,10 @@ def approve(draft_id: str, body: Approval):
         c.execute("BEGIN IMMEDIATE")
         draft = get_row(c, "drafts", draft_id)
         require_revision(draft, body.revision)
+        try:
+            parts_from_text(draft["content"], strict=True)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
         for key in json.loads(draft["source_ids"]):
             if not get_row(c, "blocks", key)["verified"]:
                 raise HTTPException(409, "关联原题尚未确认")
@@ -297,22 +309,23 @@ def capture(c, draft):
             (data_dir() / "documents" / block["document_id"] / "assets" / name).read_bytes()).decode()
                            for name in block["assets"]]
         sources.append(block)
-    return {"draft": draft_json(draft), "sources": sources, "created_at": now()}
+    return {"draft": draft_json(draft), "sources": sources, "created_at": now(), "format_version": 2}
 
 
 def render_book(snapshot):
     draft = snapshot["draft"]
+    render = render_text if snapshot.get("format_version", 1) >= 2 else html.escape
     source_html = ""
     for b in snapshot["sources"]:
         # Corrected source text is authoritative, not a stale formula preview.
         images = "".join('<img alt="原件图或页面" src="' + image + '">' for image in b["images"])
-        source_html += '<section><h3>' + html.escape(b["document_name"] + " · " + b["locator"]) + '</h3><p class="text">' + html.escape(b["text"]) + "</p>" + images + "</section>"
+        source_html += '<section><h3>' + html.escape(b["document_name"] + " · " + b["locator"]) + '</h3><p class="text">' + render(b["text"]) + "</p>" + images + "</section>"
     status = f"审核人：{draft['reviewer']} · 修订 {draft['revision']}" if draft["approved"] else "草稿 · 尚未批准"
     return ('<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
             '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; img-src data:; style-src \'unsafe-inline\'">'
             '<title>' + html.escape(draft["title"]) + '</title><style>body{font:17px/1.9 system-ui;color:#263b34;background:#fffdf8;max-width:800px;margin:40px auto;padding:0 24px}h1{font-weight:500}h3{font-size:16px}.text{white-space:pre-wrap;overflow-wrap:anywhere}img{display:block;max-width:100%;max-height:700px;object-fit:contain;margin:20px 0}section{border-bottom:1px solid #ddd;padding:12px 0}small{color:#666}@media print{body{margin:0;max-width:none;background:white}img{max-height:210mm}h1,h3{break-after:avoid}}</style>'
             '<h1>' + html.escape(draft["title"]) + '</h1><small>' + html.escape(status) + '</small>' + source_html
-            + '<h2>讲解与训练</h2><div class="text">' + html.escape(draft["content"]) + '</div></html>')
+            + '<h2>讲解与训练</h2><div class="text">' + render(draft["content"]) + '</div></html>')
 
 
 @app.get("/api/drafts/{draft_id}/preview", response_class=HTMLResponse)
@@ -338,6 +351,7 @@ def release(draft_id: str, body: ReleaseRequest):
                 raise HTTPException(409, "关联原题需要复核")
         key = uid()
         snapshot = capture(c, draft)
+        snapshot["rendered_html"] = render_book(snapshot)
         c.execute("INSERT INTO releases VALUES(?,?,?,?,?)", (key, draft_id, draft["revision"], json.dumps(snapshot, ensure_ascii=False), now()))
         return {"id": key, "revision": draft["revision"]}
 
@@ -352,11 +366,14 @@ def releases():
 def download_release(release_id: str):
     with connect() as c:
         row = get_row(c, "releases", release_id)
-        return HTMLResponse(render_book(json.loads(row["snapshot"])), headers={"Content-Disposition": f'attachment; filename="mathlet-{release_id[:8]}.html"'})
+        snapshot = json.loads(row["snapshot"])
+        return HTMLResponse(snapshot.get("rendered_html") or render_book(snapshot), headers={"Content-Disposition": f'attachment; filename="mathlet-{release_id[:8]}.html"'})
 
 
 from .planning import router as planning_router
 app.include_router(planning_router)
+from .formula_api import router as formula_router
+app.include_router(formula_router)
 
 web = ROOT / "apps" / "web" / "dist"
 if web.is_dir():

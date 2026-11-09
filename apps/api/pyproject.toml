@@ -9,7 +9,7 @@ requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.115,<1", "uvicorn>=0.32,<1", "python-multipart>=0.0.20,<1",
   "pydantic>=2.10,<3", "lxml>=5.3,<7", "pypdf>=5,<7",
-  "pypdfium2>=4.30,<6", "Pillow>=11,<13", "filelock>=3.16,<4"
+  "pypdfium2>=4.30,<6", "Pillow>=11,<13", "filelock>=3.16,<4", "latex2mathml>=3.81,<4"
 ]
 
 [project.optional-dependencies]

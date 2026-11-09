@@ -25,9 +25,9 @@ def run_one():
         with connect() as c:
             # Atomic insertion: no partially imported document is exposed as ready.
             for b in blocks:
-                c.execute("INSERT INTO blocks(id,document_id,ordinal,locator,text,preview,assets,warnings) VALUES(?,?,?,?,?,?,?,?)",
+                c.execute("INSERT INTO blocks(id,document_id,ordinal,locator,text,preview,assets,warnings,original_content) VALUES(?,?,?,?,?,?,?,?,?)",
                           (b["id"], document["id"], b["ordinal"], b["locator"], b["text"], b["preview"],
-                           json.dumps(b["assets"]), json.dumps(b["warnings"], ensure_ascii=False)))
+                           json.dumps(b["assets"]), json.dumps(b["warnings"], ensure_ascii=False), json.dumps(b.get("original_content", []), ensure_ascii=False)))
             c.execute("UPDATE documents SET status='ready' WHERE id=?", (document["id"],))
             c.execute("UPDATE jobs SET status='completed',message=?,updated_at=? WHERE id=?",
                       (f"已提取 {len(blocks)} 个内容块，待人工核对", now(), row["id"]))

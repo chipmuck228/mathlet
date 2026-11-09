@@ -12,6 +12,7 @@ from pypdf import PdfReader
 import pypdfium2 as pdfium
 
 from .db import uid
+from .formulas import structured_docx
 
 NS = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
       "m": "http://schemas.openxmlformats.org/officeDocument/2006/math"}
@@ -75,7 +76,9 @@ def extract_docx(path: Path, assets_dir: Path):
                 continue
             warnings = {"需对照原件核对公式、条件及图题对应；此处不是原页渲染"}
             assets = []
-            text = "".join(node.xpath(".//w:t/text() | .//m:t/text()", namespaces=NS))
+            text, original_content = structured_docx(node)
+            if any(p["type"] == "unsupported" for p in original_content):
+                warnings.add("部分公式未完整转换，需替换占位提示后才能确认")
 
             def render(n):
                 tag = local(n)
@@ -112,7 +115,7 @@ def extract_docx(path: Path, assets_dir: Path):
             preview = render(node)
             if text.strip() or assets:
                 yield dict(id=uid(), ordinal=ordinal, locator=f"文档块 {ordinal + 1}", text=text,
-                           preview=preview, assets=assets, warnings=sorted(warnings))
+                           preview=preview, assets=assets, warnings=sorted(warnings), original_content=original_content)
 
 
 def extract_pdf(path: Path, assets_dir: Path):
