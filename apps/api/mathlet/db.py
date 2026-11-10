@@ -96,6 +96,9 @@ def init_db():
           block_id TEXT PRIMARY KEY REFERENCES blocks(id), base_revision INTEGER NOT NULL,
           text TEXT NOT NULL, original_content TEXT NOT NULL, created_at TEXT NOT NULL
         )""")
+        if "original_text" not in columns:
+            c.execute("ALTER TABLE blocks ADD COLUMN original_text TEXT")
+        c.execute("INSERT OR IGNORE INTO schema_migrations VALUES(3,?)", (now(),))
         c.execute("INSERT OR IGNORE INTO schema_migrations VALUES(2,?)", (now(),))
 
 

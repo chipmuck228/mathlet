@@ -7,33 +7,42 @@ from filelock import FileLock, Timeout
 
 from .db import connect, data_dir, init_db, now
 from .ingest import extract
+from .original_view import build_view, enqueue
 
 
 def run_one():
     with connect() as c:
         c.execute("BEGIN IMMEDIATE")
-        row = c.execute("SELECT * FROM jobs WHERE status='queued' ORDER BY created_at LIMIT 1").fetchone()
+        row = c.execute("SELECT * FROM jobs WHERE status='queued' ORDER BY CASE WHEN kind='ingest' THEN 0 ELSE 1 END, created_at LIMIT 1").fetchone()
         if not row:
             return False
         c.execute("UPDATE jobs SET status='running',message='正在读取原件',updated_at=? WHERE id=?", (now(), row["id"]))
         document = c.execute("SELECT * FROM documents WHERE id=?", (row["document_id"],)).fetchone()
     folder = data_dir() / "documents" / document["id"]
     try:
+        if row["kind"] == "original_view":
+            build_view(document["id"])
+            with connect() as c:
+                c.execute("UPDATE jobs SET status='completed',message='原页预览已生成',updated_at=? WHERE id=?", (now(), row["id"]))
+            return True
         blocks = extract(folder / ("original." + document["kind"]), document["kind"], folder / "assets")
         if not blocks:
             raise ValueError("未提取到可审阅内容，请检查文件")
         with connect() as c:
             # Atomic insertion: no partially imported document is exposed as ready.
             for b in blocks:
-                c.execute("INSERT INTO blocks(id,document_id,ordinal,locator,text,preview,assets,warnings,original_content) VALUES(?,?,?,?,?,?,?,?,?)",
+                c.execute("INSERT INTO blocks(id,document_id,ordinal,locator,text,preview,assets,warnings,original_content,original_text) VALUES(?,?,?,?,?,?,?,?,?,?)",
                           (b["id"], document["id"], b["ordinal"], b["locator"], b["text"], b["preview"],
-                           json.dumps(b["assets"]), json.dumps(b["warnings"], ensure_ascii=False), json.dumps(b.get("original_content", []), ensure_ascii=False)))
+                           json.dumps(b["assets"]), json.dumps(b["warnings"], ensure_ascii=False), json.dumps(b.get("original_content", []), ensure_ascii=False), b["text"]))
+            if document["kind"] == "docx":
+                enqueue(c, document["id"])
             c.execute("UPDATE documents SET status='ready' WHERE id=?", (document["id"],))
             c.execute("UPDATE jobs SET status='completed',message=?,updated_at=? WHERE id=?",
                       (f"已提取 {len(blocks)} 个内容块，待人工核对", now(), row["id"]))
     except Exception as e:
         with connect() as c:
-            c.execute("UPDATE documents SET status='failed' WHERE id=?", (document["id"],))
+            if row["kind"] != "original_view":
+                c.execute("UPDATE documents SET status='failed' WHERE id=?", (document["id"],))
             c.execute("UPDATE jobs SET status='failed',message=?,updated_at=? WHERE id=?",
                       (f"读取失败：{type(e).__name__}: {str(e)[:300]}", now(), row["id"]))
     return True

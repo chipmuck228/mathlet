@@ -37,7 +37,7 @@ export default function MathBlockEditor({ block, text, disabled, onChange, onFoc
     setEditing(formula?.type === "math" ? { start: formula.start, end: formula.end, latex: formula.latex } : { start, end, latex: draft.slice(start, end) })
   }
   return <div className="mixed-content">
-    {mathParts(text).some(p => p.type === "math") ? <div className="block-reading">{preview(text)}</div> : <textarea className="continuous-text" aria-label={`待核对内容 ${block.locator}`} value={text} disabled={disabled} rows={Math.max(2, text.split("\n").length)} onFocus={onFocus} onChange={e => onChange(e.target.value)} />}
+    {mathParts(text).some(p => p.type === "math") ? <div className="block-reading">{preview(text)}</div> : <textarea className="continuous-text" aria-label={`提取结果 ${block.locator}`} value={text} disabled={disabled} rows={Math.max(2, text.split("\n").length)} onFocus={onFocus} onChange={e => onChange(e.target.value)} />}
     <div className="actions math-block-actions"><Button variant="ghost" size="sm" disabled={disabled} onClick={() => { onFocus(); setPreviewError(""); setDraft(text) }}>插入公式</Button><span className="small muted">打开完整正文，统一编辑文字与公式</span></div>
     {draft !== null && <div className="formula-overlay"><section className="formula-dialog" role="dialog" aria-modal="true" aria-labelledby="full-content-title" onKeyDown={e => { if (e.key === "Escape" && !editing) setDraft(null) }}>
       <h2 id="full-content-title">编辑完整内容</h2>

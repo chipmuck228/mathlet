@@ -104,6 +104,10 @@ def retry(job_id: str):
         row = get_row(c, "jobs", job_id)
         if row["status"] != "failed":
             raise HTTPException(409, "仅失败任务可以重试")
+        if row["kind"] == "original_view":
+            from .original_view import enqueue
+            enqueue(c, row["document_id"])
+            return {"ok": True}
         c.execute("UPDATE jobs SET status='queued',message='等待重试',updated_at=? WHERE id=?", (now(), job_id))
         c.execute("UPDATE documents SET status='queued' WHERE id=?", (row["document_id"],))
     return {"ok": True}
@@ -374,6 +378,9 @@ from .planning import router as planning_router
 app.include_router(planning_router)
 from .formula_api import router as formula_router
 app.include_router(formula_router)
+
+from .original_view import router as original_view_router
+app.include_router(original_view_router)
 
 web = ROOT / "apps" / "web" / "dist"
 if web.is_dir():

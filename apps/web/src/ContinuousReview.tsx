@@ -3,6 +3,7 @@ import { Check, Save, Search } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { api, json, type Block, type FormulaPart } from "@/lib/api"
 import MathBlockEditor from "./MathBlockEditor"
+import OriginalDocument from "./OriginalDocument"
 
 type Candidate = { block_id: string; base_revision: number; text: string; content: FormulaPart[] }
 
@@ -22,7 +23,6 @@ export default function ContinuousReview({ blocks, documentId, kind, focusId, on
   const [candidates, setCandidates] = useState<Candidate[]>([])
   useEffect(() => { if (kind === "docx") void api<Candidate[]>(`/documents/${documentId}/formula-candidates`).then(setCandidates).catch(() => {}) }, [documentId, kind])
   const left = useRef(new Map<string, HTMLElement>())
-  const right = useRef(new Map<string, HTMLElement>())
   const dirty = base.filter(b => texts[b.id] !== b.text)
   const dirtyFlag = dirty.length > 0
   useEffect(() => { onDirtyChange(dirtyFlag) }, [dirtyFlag, onDirtyChange])
@@ -35,12 +35,11 @@ export default function ContinuousReview({ blocks, documentId, kind, focusId, on
     if (focusId && left.current.has(focusId)) {
       setActive(focusId)
       left.current.get(focusId)?.scrollIntoView({ block: "nearest" })
-      right.current.get(focusId)?.scrollIntoView({ block: "nearest" })
+
     }
   }, [focusId])
   function locate(id: string, both = false) {
     setActive(id)
-    right.current.get(id)?.scrollIntoView({ block: "nearest" })
     if (both) left.current.get(id)?.scrollIntoView({ block: "nearest" })
   }
   function findNext() {
@@ -89,27 +88,22 @@ export default function ContinuousReview({ blocks, documentId, kind, focusId, on
       {message && <p className="feedback mt-4" role="status">{message}</p>}
     </div>
     <div className="continuous-review">
-      <section className="review-column" aria-label="待核对内容连续编辑">
-        <div className="review-column-title"><h2>待核对内容</h2><p>文字可直接修改；点击公式进行可视化编辑，也可插入公式。</p></div>
+      <section className="review-column" aria-label="提取结果连续编辑">
+        <div className="review-column-title"><h2>提取结果 · 可编辑</h2><p>这是从原件提取的正文与配图。请对照右侧原始文档修订，再保存并确认；不会另外生成一份待核对正文。</p></div>
         <div className="review-scroll">
           {base.map(b => <article key={b.id} ref={e => { if (e) left.current.set(b.id, e); else left.current.delete(b.id) }} className={`review-block ${active === b.id ? "is-active" : ""}`}>
             <div className="review-block-meta"><label className="checkline"><input aria-label={`选择 ${b.locator}`} type="checkbox" checked={selection.includes(b.id)} disabled={busy} onChange={e => setSelection(old => e.target.checked ? [...old, b.id] : old.filter(id => id !== b.id))} />{b.locator}</label><span>{texts[b.id] !== b.text ? "未保存" : b.verified ? "已核对" : "待核对"}</span></div>
             <MathBlockEditor block={b} text={texts[b.id]} disabled={busy} onFocus={() => locate(b.id)} onChange={text => setTexts(old => ({ ...old, [b.id]: text }))} />
+            <details className="extraction-baseline"><summary>查看初次提取记录</summary>{b.original_text != null ? <pre>{b.original_text}</pre> : <p className="small muted">此旧资料未记录初次提取正文；不会以当前修订冒充初始结果。请对照原件或使用重新提取候选。</p>}</details>
+            {b.warnings.length > 0 && <details className="review-warning"><summary>提取注意事项</summary>{b.warnings.map(w => <p key={w}>{w}</p>)}</details>}
+            {kind === "pdf" && <p className="small muted">PDF 当前按页提取文字；图表、公式及扫描内容请对照右侧原页补充，未自动拆为可编辑图表。</p>}
             {candidates.filter(c => c.block_id === b.id).map(c => <details key={c.block_id} className="formula-candidate"><summary>对照原件重新提取的公式候选</summary><p className="small muted">当前正文保留在上方。采用候选会替换本来源块的全部文字，请检查是否包含人工修订。</p><div className="candidate-reading">{c.content.map((p, i) => p.type === "math" && p.mathml ? <span key={i} dangerouslySetInnerHTML={{ __html: p.mathml }} /> : <span key={i}>{p.text || p.latex}</span>)}</div><Button variant="outline" size="sm" disabled={busy || c.base_revision !== b.revision} onClick={() => { if (window.confirm("采用候选将替换本块当前文字，尚不会保存。是否已对照并保留需要的人工修改？")) setTexts(old => ({ ...old, [b.id]: c.text })) }}>采用此候选到编辑区</Button>{c.base_revision !== b.revision && <p className="small muted">来源修订已变化，请重新提取。</p>}</details>)}
-            {b.assets.map(name => <img key={name} className="review-asset" src={`/api/documents/${documentId}/assets/${name}`} alt={`${b.locator} 原始配图，当前不支持编辑`} loading="lazy" />)}
+            {kind !== "pdf" && b.assets.map(name => <img key={name} className="review-asset" src={`/api/documents/${documentId}/assets/${name}`} alt={`${b.locator} 原始配图，当前不支持编辑`} loading="lazy" />)}
           </article>)}
         </div>
       </section>
       <section className="review-column" aria-label="原始资料对照">
-        <div className="review-column-title"><h2>{kind === "pdf" ? "原始 PDF 页面" : "原始提取结果与配图"}</h2><p>{kind === "pdf" ? "页面图用于对照，点击左侧内容可定位。" : "并非 Word 原页渲染，复杂排版请下载原件核对。"}</p><a href={`/api/documents/${documentId}/original`}>下载原始文件</a></div>
-        <div className="review-scroll">
-          {base.map(b => <article key={b.id} ref={e => { if (e) right.current.set(b.id, e); else right.current.delete(b.id) }} className={`review-block reference-block ${active === b.id ? "is-active" : ""}`}>
-            <div className="review-block-meta"><button onClick={() => locate(b.id, true)}>{b.locator} · 定位左侧</button><span>原始证据</span></div>
-            {kind !== "pdf" && <div className="source-preview" dangerouslySetInnerHTML={{ __html: b.preview }} />}
-            {b.assets.map(name => <img key={name} className="review-asset" src={`/api/documents/${documentId}/assets/${name}`} alt={`${b.locator} 原始图像`} loading="lazy" />)}
-            {b.warnings.length > 0 && <details className="review-warning"><summary>提取注意事项</summary>{b.warnings.map(w => <p key={w}>{w}</p>)}</details>}
-          </article>)}
-        </div>
+        <OriginalDocument key={documentId} documentId={documentId} kind={kind} />
       </section>
     </div>
   </>

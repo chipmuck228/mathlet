@@ -10,26 +10,27 @@ beforeEach(() => {
   vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} })
   Element.prototype.scrollIntoView = vi.fn()
   vi.mocked(api).mockReset()
-  vi.mocked(api).mockImplementation(async (path) => { if (path.endsWith("formula-candidates")) return []; throw new Error("Unexpected API") })
+  vi.mocked(api).mockImplementation(async (path) => { if (path.endsWith("original-view")) return { status: "not_generated", pages: 0, converted: true }; if (path.endsWith("formula-candidates")) return []; throw new Error("Unexpected API") })
 })
 afterEach(cleanup)
 
 describe("continuous source review", () => {
   it("shows every editable block and keeps the full document when searching", () => {
     render(<ContinuousReview blocks={blocks} documentId="d" kind="docx" focusId="" onSaved={vi.fn()} onDirtyChange={vi.fn()} />)
-    for (const b of blocks) expect(screen.getByRole("textbox", { name: `待核对内容 ${b.locator}` })).toBeTruthy()
+    for (const b of blocks) expect(screen.getByRole("textbox", { name: `提取结果 ${b.locator}` })).toBeTruthy()
     fireEvent.change(screen.getByRole("textbox", { name: "查找连续内容" }), { target: { value: "题目2" } })
     fireEvent.click(screen.getByRole("button", { name: "定位下一处" }))
-    for (const b of blocks) expect(screen.getByRole("textbox", { name: `待核对内容 ${b.locator}` })).toBeTruthy()
-    expect(screen.getByText(/并非 Word 原页渲染/)).toBeTruthy()
-    expect(vi.mocked(api).mock.calls.every(([path]) => path.endsWith("formula-candidates"))).toBe(true)
+    for (const b of blocks) expect(screen.getByRole("textbox", { name: `提取结果 ${b.locator}` })).toBeTruthy()
+    expect(screen.getByRole("heading", { name: "原始文档 · 只读" })).toBeTruthy()
+    expect(screen.queryByText("原文1")).toBeNull()
+    expect(vi.mocked(api).mock.calls.every(([path]) => (path.endsWith("formula-candidates") || path.endsWith("original-view")))).toBe(true)
   })
 
   it("saves only edits without approval and confirms only the selected scope", async () => {
     vi.mocked(api).mockImplementation(async (path) => path.endsWith("formula-candidates") ? [] : [{ ...blocks[0], text: "修正题一", revision: 2 }])
     const onDirty = vi.fn()
     render(<ContinuousReview blocks={blocks} documentId="d" kind="docx" focusId="" onSaved={vi.fn()} onDirtyChange={onDirty} />)
-    fireEvent.change(screen.getByRole("textbox", { name: "待核对内容 文档块 1" }), { target: { value: "修正题一" } })
+    fireEvent.change(screen.getByRole("textbox", { name: "提取结果 文档块 1" }), { target: { value: "修正题一" } })
     fireEvent.click(screen.getByRole("button", { name: "保存修改（1）" }))
     await waitFor(() => expect(screen.getByText(/已保存 1 处修改/)).toBeTruthy())
     const save = JSON.parse(vi.mocked(api).mock.calls.filter(([path]) => path.endsWith("/review"))[0][1]!.body as string)
@@ -46,11 +47,11 @@ describe("continuous source review", () => {
   it("keeps edits after a conflict instead of replacing them with stale server text", async () => {
     vi.mocked(api).mockRejectedValue(new Error("内容已变化"))
     render(<ContinuousReview blocks={blocks} documentId="d" kind="pdf" focusId="" onSaved={vi.fn()} onDirtyChange={vi.fn()} />)
-    const input = screen.getByRole("textbox", { name: "待核对内容 文档块 1" }) as HTMLTextAreaElement
+    const input = screen.getByRole("textbox", { name: "提取结果 文档块 1" }) as HTMLTextAreaElement
     fireEvent.change(input, { target: { value: "不能丢失的修改" } })
     fireEvent.click(screen.getByRole("button", { name: "保存修改（1）" }))
     await waitFor(() => expect(screen.getByText(/本地修改已保留/)).toBeTruthy())
     expect(input.value).toBe("不能丢失的修改")
-    expect(screen.getByText("原始 PDF 页面")).toBeTruthy()
+    expect(screen.getByRole("heading", { name: "原始文档 · 只读" })).toBeTruthy()
   })
 })
