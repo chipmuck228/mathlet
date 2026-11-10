@@ -227,3 +227,27 @@ def test_main_worker_dispatches_knowledge_when_file_queue_is_empty(client,monkey
     monkeypatch.setattr(worker,'generate',model)
     assert run_one()
     assert client.get(f"/api/knowledge/runs/{run['id']}").json()['status']=='awaiting_selection'
+
+def test_legacy_invalid_key_can_be_replaced_without_returning_its_value(client):
+    from mathlet.model_provider import config_path
+    config_path().write_text(json.dumps({'base_url':'https://api.deepseek.com','model':'deepseek-flash','api_key':'sk-secret中文注释'}))
+    result=client.get('/api/knowledge/provider')
+    assert result.status_code==200 and not result.json()['ready']
+    assert result.json()['credential_error'] and 'sk-secret' not in result.text
+    repaired=client.put('/api/knowledge/provider',json={'base_url':'https://api.deepseek.com','model':'deepseek-flash','api_key':'valid-test-key'})
+    assert repaired.status_code==200 and repaired.json()['ready']
+    assert repaired.json()['thinking_mode']=='auto' and not repaired.json()['credential_error']
+
+
+def test_failed_empty_response_preserves_usage_in_run_artifacts(client,monkeypatch):
+    from mathlet.model_provider import ModelOutputError
+    unit,run=setup(client)
+    def empty(*_):raise ModelOutputError('空正文 finish_reason=length','',{'completion_tokens':1800})
+    monkeypatch.setattr(worker,'generate',empty)
+    worker.run_one_knowledge()
+    result=client.get(f"/api/knowledge/runs/{run['id']}").json()
+    assert result['status']=='failed'
+    assert result['calls'][0]['usage']=={'completion_tokens':1800}
+    artifacts=client.get(f"/api/knowledge/runs/{run['id']}/artifacts").json()
+    request=json.loads(artifacts['calls'][0]['request_json'])
+    assert request['transport_version']=='chat-v2'
