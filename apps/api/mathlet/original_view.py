@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 
 from fastapi import APIRouter, HTTPException
@@ -11,6 +12,7 @@ from filelock import FileLock
 from pypdf import PdfReader
 
 from .db import connect, data_dir, now, uid
+from .office_profile import seed_font_settings
 
 router = APIRouter(prefix="/api", tags=["original-view"])
 
@@ -19,6 +21,9 @@ def converter():
     configured = os.environ.get("MATHLET_SOFFICE")
     if configured and Path(configured).is_file():
         return configured
+    mac_application = Path('/Applications/LibreOffice.app/Contents/MacOS/soffice')
+    if sys.platform == 'darwin' and mac_application.is_file():
+        return str(mac_application)
     return (shutil.which("soffice") or shutil.which("libreoffice") or
             next((str(p) for p in (Path('/Applications/LibreOffice.app/Contents/MacOS/soffice'),
                   Path('C:/Program Files/LibreOffice/program/soffice.exe')) if p.is_file()), None))
@@ -89,6 +94,7 @@ def build_view(document_id):
     # Isolated profile avoids opening/locking a user's interactive LibreOffice session.
     with FileLock(str(folder / 'original-view.lock'), timeout=1), tempfile.TemporaryDirectory(prefix='mathlet-view-') as temp:
         work = Path(temp)
+        profile_note = seed_font_settings(work / "profile")
         result = subprocess.run([executable, '-env:UserInstallation=' + (work / 'profile').as_uri(),
                                  '--headless', '--convert-to', 'pdf:writer_pdf_Export', '--outdir', str(work),
                                  str(folder / 'original.docx')], capture_output=True, timeout=120)
@@ -101,3 +107,4 @@ def build_view(document_id):
         staged = folder / 'original-view.tmp'
         shutil.copyfile(generated, staged)
         staged.replace(target)
+        return "原页预览已生成；" + profile_note

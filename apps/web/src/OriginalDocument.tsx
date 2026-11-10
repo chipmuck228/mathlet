@@ -31,6 +31,7 @@ export default function OriginalDocument({ documentId, kind }: { documentId: str
       <p>{kind === "docx" ? "由原始 DOCX 经 LibreOffice 转换的页面，独立于提取正文。字体与分页可能和 Word 有差异，存疑时请打开原件。文档块与页码不自动对应，请按题号翻页。" : "直接查看上传的原始 PDF，独立于提取正文。"}</p>
       <div className="actions"><a href={`/api/documents/${documentId}/original`}>下载原始文件</a>{available && <a href={url} target="_blank" rel="noreferrer">单独打开页面预览</a>}{kind === "docx" && available && <Button disabled={generating} onClick={() => generate(true)}>{generating ? "正在重新生成…" : "重新生成原文预览"}</Button>}</div>
     </div>
+    {kind === "docx" && view?.status === "ready" && view.message && <p className="small muted">{view.message}</p>}
     {error && <p role="alert">原页预览暂不可用：{error}</p>}
     {available && view?.status !== "ready" && <p role="status">{view?.message}{view?.status === "failed" ? "；重新生成失败，保留上次预览。" : "；仍显示上次预览。"}</p>}
     {available ? <>

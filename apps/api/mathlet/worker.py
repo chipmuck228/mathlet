@@ -21,9 +21,9 @@ def run_one():
     folder = data_dir() / "documents" / document["id"]
     try:
         if row["kind"] == "original_view":
-            build_view(document["id"])
+            conversion_message = build_view(document["id"]) or "原页预览已生成"
             with connect() as c:
-                c.execute("UPDATE jobs SET status='completed',message='原页预览已生成',updated_at=? WHERE id=?", (now(), row["id"]))
+                c.execute("UPDATE jobs SET status='completed',message=?,updated_at=? WHERE id=?", (conversion_message, now(), row["id"]))
             return True
         blocks = extract(folder / ("original." + document["kind"]), document["kind"], folder / "assets")
         if not blocks:

@@ -6,7 +6,7 @@ Mathlet 是用于中考数学复习小册子的本地编辑与审核工作台。
 
 ## 本地运行
 
-需要 Git、Python 3.11+、Node.js 22.12+（建议使用仍受支持的 LTS）。DOCX 原页预览另需本机安装 LibreOffice；找不到 soffice 时可设置 `MATHLET_SOFFICE` 为可执行文件绝对路径。未安装时仍可提取和编辑，但右侧会提示无法生成原页。macOS/Linux：
+需要 Git、Python 3.11+、Node.js 22.12+（建议使用仍受支持的 LTS）。DOCX 原页预览另需本机安装 LibreOffice；找不到 soffice 时可设置 `MATHLET_SOFFICE` 为可执行文件绝对路径。未安装时仍可提取和编辑，但右侧会提示无法生成原页。自动转换会读取已保存的 LibreOffice 字体／语言设置后在独立配置中运行；手动设置过字体替换后请先退出 LibreOffice，再重新生成预览。macOS/Linux：
 
 ```bash
 git clone https://github.com/chipmuck228/mathlet.git
