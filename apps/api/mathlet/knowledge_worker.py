@@ -59,8 +59,20 @@ def parse(text):
 def call(run, config, step, task, payload, max_tokens, validator):
     # Successful checkpoints are reused; an interrupted or failed call reserves budget too.
     with connect() as c:
-        cached=c.execute("SELECT raw_response FROM knowledge_calls WHERE run_id=? AND step=? AND status='succeeded' ORDER BY rowid DESC LIMIT 1",(run['id'],step)).fetchone()
+        cached=c.execute("SELECT raw_response FROM knowledge_calls WHERE run_id=? AND step=? AND status IN ('succeeded','revalidated') ORDER BY rowid DESC LIMIT 1",(run['id'],step)).fetchone()
         if cached: return validator(parse(cached['raw_response']))
+        # Older workers rejected otherwise valid details solely for identity wording.
+        # Revalidate saved evidence on explicit retry; do not spend another model call.
+        if step.startswith('details:'):
+            previous=c.execute("SELECT id,raw_response FROM knowledge_calls WHERE run_id=? AND step=? AND status='failed' AND error=? ORDER BY rowid DESC LIMIT 1",
+                (run['id'],step,'展开结果改变了清单的名称或类型，请重试')).fetchone()
+            if previous:
+                try: recovered=validator(parse(previous['raw_response']))
+                except (ValueError,TypeError): pass
+                else:
+                    c.execute("UPDATE knowledge_calls SET status='revalidated',error=?,updated_at=? WHERE id=?",
+                        ('历史响应重新校验通过，未新增模型调用；原错误：展开结果改变了清单的名称或类型，请重试',now(),previous['id']))
+                    return recovered
         count,reserved=c.execute('SELECT count(*),coalesce(sum(reserved_tokens),0) FROM knowledge_calls WHERE run_id=?',(run['id'],)).fetchone()
         if count>=config.max_calls or reserved+max_tokens>config.output_token_budget:
             raise ValueError('本批次达到调用次数或输出token预留预算；请调整配置后另建新候选批次，不会自动继续计费')
@@ -133,9 +145,6 @@ def run_one_knowledge():
                 parsed=Details.model_validate(value)
                 ids=[x.knowledge_id for x in parsed.items]
                 if len(set(ids))!=len(ids) or set(ids)!=set(by_id): raise ValueError('展开结果的知识ID缺失、重复或超出本批范围')
-                for item in parsed.items:
-                    if item.body.name!=by_id[item.knowledge_id]['name'] or item.body.kind!=by_id[item.knowledge_id]['kind']:
-                        raise ValueError('展开结果改变了清单的名称或类型，请重试')
                 return parsed
             result=call(run,config,f'details:{offset//4}',
                 '展开指定清单。返回 {"items":[{"knowledge_id":"输入id","body":'+packed(BODY_SHAPE)+'}]}。名称、类型、ID必须与清单一致。正文内公式用\\(与\\)定界，formula字段仅放不带定界符的LaTeX。JSON中的反斜杠必须正确转义。',
@@ -143,9 +152,11 @@ def run_one_knowledge():
             with connect() as c:
                 # Write the whole batch atomically; never update an existing candidate.
                 for item in result.items:
-                    body=packed(item.body.model_dump())
+                    original=packed(item.body.model_dump())
+                    identity=by_id[item.knowledge_id]
+                    body=packed(item.body.model_copy(update={'name':identity['name'],'kind':identity['kind']}).model_dump())
                     c.execute('INSERT OR IGNORE INTO knowledge_candidates(id,run_id,knowledge_id,body,original_body) VALUES(?,?,?,?,?)',
-                        (uid(),run['id'],item.knowledge_id,body,body))
+                        (uid(),run['id'],item.knowledge_id,body,original))
                 c.execute('UPDATE knowledge_runs SET updated_at=? WHERE id=?',(now(),run['id']))
         ensure_current(run)
         with connect() as c:
@@ -157,8 +168,15 @@ def run_one_knowledge():
             return result
         critic=call(run,config,'critic','作为单独一轮数学检查，查找条件缺失、定义错误、反例、重复或超范围疑问。只提出需要教师判断的问题，不替教师批准，也不伪造检索来源。返回 {"issues":[{"knowledge_id":"...","message":"具体问题"}]}，没有发现问题返回空数组。',
             {'unit':snapshot,'candidates':candidates},2200,validate_critic)
+        identity_checks=[]
+        catalog_by_id={x['id']:x for x in catalog}
         with connect() as c:
-            c.execute("UPDATE knowledge_runs SET checks=?,status='completed',stage='completed',revision=revision+1,updated_at=? WHERE id=?",(packed([x.model_dump() for x in critic.issues]),now(),run['id']))
+            for candidate in c.execute('SELECT knowledge_id,original_body FROM knowledge_candidates WHERE run_id=?',(run['id'],)):
+                original=json.loads(candidate['original_body']); identity=catalog_by_id[candidate['knowledge_id']]
+                changes=[f"{field}：清单为 {identity[field]}，模型建议为 {original.get(field)}" for field in ['name','kind'] if original.get(field)!=identity[field]]
+                if changes:
+                    identity_checks.append({'knowledge_id':candidate['knowledge_id'],'message':'展开时模型改写了名称或类型；当前保留清单身份，请核对正文是否仍对应原知识，并在处理说明中记录决定。'+'；'.join(changes)})
+            c.execute("UPDATE knowledge_runs SET checks=?,status='completed',stage='completed',revision=revision+1,updated_at=? WHERE id=?",(packed(identity_checks+[x.model_dump() for x in critic.issues]),now(),run['id']))
     except Exception as exc:
         try: secret=load_provider().api_key
         except Exception: secret=''

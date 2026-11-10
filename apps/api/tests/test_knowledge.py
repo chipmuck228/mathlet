@@ -251,3 +251,84 @@ def test_failed_empty_response_preserves_usage_in_run_artifacts(client,monkeypat
     artifacts=client.get(f"/api/knowledge/runs/{run['id']}/artifacts").json()
     request=json.loads(artifacts['calls'][0]['request_json'])
     assert request['transport_version']=='chat-v2'
+
+
+def test_changed_identity_is_proposal_not_batch_failure(client,monkeypatch):
+    _,run=setup(client)
+    def renamed(config,system,payload,max_tokens):
+        raw,usage=model(config,system,payload,max_tokens)
+        if '展开指定清单' in system:
+            result=json.loads(raw)
+            result['items'][0]['body'].update(name='一元一次方程的定义',kind='property')
+            raw=json.dumps(result,ensure_ascii=False)
+        return raw,usage
+    monkeypatch.setattr(worker,'generate',renamed)
+    worker.run_one_knowledge()
+    current=client.get(f"/api/knowledge/runs/{run['id']}").json()
+    client.post(f"/api/knowledge/runs/{run['id']}/expand",json={'revision':current['revision'],'selected_ids':[x['id'] for x in current['catalog']]})
+    worker.run_one_knowledge()
+    current=client.get(f"/api/knowledge/runs/{run['id']}").json()
+    assert current['status']=='completed',current
+    item=next(x for x in current['items'] if x['original_body']['name']=='一元一次方程的定义')
+    assert item['body']['name']=='一元一次方程' and item['body']['kind']=='concept'
+    assert item['original_body']['kind']=='property'
+    assert any(x['knowledge_id']==item['knowledge_id'] and '模型改写' in x['message'] for x in current['checks'])
+    selected=[{'id':item['id'],'revision':item['revision']}]
+    scoped=client.post(f"/api/knowledge/runs/{run['id']}/scope",json={'revision':current['revision'],'items':selected,'scope':'core'}).json()
+    item=next(x for x in scoped['items'] if x['id']==item['id'])
+    response=client.post(f"/api/knowledge/runs/{run['id']}/review",json={'revision':scoped['revision'],'items':[{'id':item['id'],'revision':item['revision']}],'reviewer':'老师','confirmed':True})
+    assert response.status_code==422
+    edited=client.put(f"/api/knowledge/candidates/{item['id']}",json={'revision':item['revision'],'body':item['body'],'scope':'core','review_note':'已核对正文与概念相符，保留清单名称和类型'}).json()
+    current=client.get(f"/api/knowledge/runs/{run['id']}").json()
+    approved=client.post(f"/api/knowledge/runs/{run['id']}/review",json={'revision':current['revision'],'items':[{'id':edited['id'],'revision':edited['revision']}],'reviewer':'老师','confirmed':True})
+    assert approved.status_code==200,approved.text
+
+
+@pytest.mark.parametrize('mutation',['missing','duplicate','foreign'])
+def test_details_still_reject_invalid_ids(client,monkeypatch,mutation):
+    _,run=setup(client)
+    def invalid(config,system,payload,max_tokens):
+        raw,usage=model(config,system,payload,max_tokens)
+        if '展开指定清单' in system:
+            result=json.loads(raw)
+            if mutation=='missing': result['items'].pop()
+            elif mutation=='duplicate': result['items'][1]['knowledge_id']=result['items'][0]['knowledge_id']
+            else: result['items'][0]['knowledge_id']='foreign-id'
+            raw=json.dumps(result)
+        return raw,usage
+    monkeypatch.setattr(worker,'generate',invalid)
+    worker.run_one_knowledge()
+    current=client.get(f"/api/knowledge/runs/{run['id']}").json()
+    client.post(f"/api/knowledge/runs/{run['id']}/expand",json={'revision':current['revision'],'selected_ids':[x['id'] for x in current['catalog']]})
+    worker.run_one_knowledge()
+    current=client.get(f"/api/knowledge/runs/{run['id']}").json()
+    assert current['status']=='failed' and 'ID缺失' in current['error']
+    assert current['items']==[]
+
+
+def test_legacy_identity_failure_reuses_saved_response_on_retry(client,monkeypatch):
+    _,run=setup(client)
+    monkeypatch.setattr(worker,'generate',model)
+    worker.run_one_knowledge()
+    current=client.get(f"/api/knowledge/runs/{run['id']}").json()
+    client.post(f"/api/knowledge/runs/{run['id']}/expand",json={'revision':current['revision'],'selected_ids':[x['id'] for x in current['catalog']]})
+    raw,_=model(None,'展开指定清单',{'items':current['catalog']},5000)
+    result=json.loads(raw);result['items'][0]['body']['name']='模型改名'
+    from mathlet.db import uid,now
+    with connect() as c:
+        c.execute('INSERT INTO knowledge_calls(id,run_id,step,status,request_json,raw_response,error,reserved_tokens,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)',
+            (uid(),run['id'],'details:0','failed','{}',json.dumps(result),'展开结果改变了清单的名称或类型，请重试',5000,now(),now()))
+        c.execute("UPDATE knowledge_runs SET status='failed' WHERE id=?",(run['id'],))
+    current=client.get(f"/api/knowledge/runs/{run['id']}").json()
+    assert client.post(f"/api/knowledge/runs/{run['id']}/retry",json={'revision':current['revision']}).status_code==200
+    calls=[]
+    def critic_only(config,system,payload,max_tokens):
+        assert '展开指定清单' not in system
+        calls.append(system)
+        return model(config,system,payload,max_tokens)
+    monkeypatch.setattr(worker,'generate',critic_only)
+    worker.run_one_knowledge()
+    current=client.get(f"/api/knowledge/runs/{run['id']}").json()
+    assert current['status']=='completed',current
+    assert len(calls)==1 and len(current['calls'])==3
+    assert any(x['status']=='revalidated' for x in current['calls'])
