@@ -1,6 +1,6 @@
 import io
 import json
-from zipfile import ZipFile
+from zipfile import ZipFile, ZipInfo
 
 import pytest
 from fastapi.testclient import TestClient
@@ -21,7 +21,7 @@ def client(tmp_path, monkeypatch):
 def docx_bytes():
     stream = io.BytesIO()
     with ZipFile(stream, "w") as z:
-        z.writestr("word/document.xml", '''<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math"><w:body><w:p><w:r><w:t>1. 点在函数图像上：</w:t></w:r><m:oMath><m:f><m:num><m:r><m:t>k</m:t></m:r></m:num><m:den><m:r><m:t>x</m:t></m:r></m:den></m:f></m:oMath></w:p></w:body></w:document>''')
+        z.writestr(ZipInfo("word/document.xml", date_time=(2000, 1, 1, 0, 0, 0)), '''<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math"><w:body><w:p><w:r><w:t>1. 点在函数图像上：</w:t></w:r><m:oMath><m:f><m:num><m:r><m:t>k</m:t></m:r></m:num><m:den><m:r><m:t>x</m:t></m:r></m:den></m:f></m:oMath></w:p></w:body></w:document>''')
     return stream.getvalue()
 
 

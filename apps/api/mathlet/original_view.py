@@ -13,6 +13,7 @@ from pypdf import PdfReader
 
 from .db import connect, data_dir, now, uid
 from .office_profile import seed_font_settings
+from .font_environment import conversion_environment, reject_known_missing_cjk
 
 router = APIRouter(prefix="/api", tags=["original-view"])
 
@@ -95,16 +96,18 @@ def build_view(document_id):
     with FileLock(str(folder / 'original-view.lock'), timeout=1), tempfile.TemporaryDirectory(prefix='mathlet-view-') as temp:
         work = Path(temp)
         profile_note = seed_font_settings(work / "profile")
+        environment, font_note = conversion_environment(executable, work)
         result = subprocess.run([executable, '-env:UserInstallation=' + (work / 'profile').as_uri(),
                                  '--headless', '--convert-to', 'pdf:writer_pdf_Export', '--outdir', str(work),
-                                 str(folder / 'original.docx')], capture_output=True, timeout=120)
+                                 str(folder / 'original.docx')], capture_output=True, timeout=120, env=environment)
         generated = work / 'original.pdf'
         if result.returncode or not generated.is_file():
             raise ValueError('DOCX 原页转换失败，请检查文件是否可在 LibreOffice 打开；可下载原件核对后重试。')
         reader = PdfReader(generated)
         if not 0 < len(reader.pages) <= 120:
             raise ValueError('原页预览仅支持1至120页，请拆分资料')
+        reject_known_missing_cjk(reader)
         staged = folder / 'original-view.tmp'
         shutil.copyfile(generated, staged)
         staged.replace(target)
-        return "原页预览已生成；" + profile_note
+        return "原页预览已生成；" + profile_note + font_note

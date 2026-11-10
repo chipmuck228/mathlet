@@ -12,6 +12,8 @@
 - 新上传 DOCX 自动排队生成原页；旧资料点击右侧“生成原文预览”。需要安装 LibreOffice，可用环境变量 `MATHLET_SOFFICE` 指定 soffice 可执行文件绝对路径（不是目录）。macOS 常见位置 `/Applications/LibreOffice.app/Contents/MacOS/soffice`。首次失败安装后点击重试，不需要重新上传。
 - 已生成的 DOCX 原页可点击“重新生成原文预览”，用于安装字体或语言包后的重新转换。排队与转换期间保留上次预览，失败不删除旧 PDF，成功后更新预览地址以避免浏览器继续使用旧缓存。重复点击不会重复排队。原始 PDF 无需转换，不提供此按钮。
 - 转换不再从完全空白配置开始：macOS 优先使用 `/Applications` 中的 LibreOffice（显式指定 `MATHLET_SOFFICE` 时除外），避免命中 PATH 中另一套程序。自动读取当前系统用户 LibreOffice 已保存的字体替换、默认字体和语言设置，复制到临时转换配置；同时带入配置目录中的字体文件。不直接运行或修改日常配置，不复制宏、锁文件或最近文档列表。请先完全退出 LibreOffice，让界面设置写入磁盘，再点击重新生成。macOS 默认读取 `~/Library/Application Support/LibreOffice/4/user`；非默认位置可设置 `MATHLET_LIBREOFFICE_PROFILE` 为该 `user` 目录或其上级 `4` 目录。预览区显示实际复制的设置数量。此修正不等于已经验证所有中文字体和 macOS 渲染行为；若手动 PDF 正常而自动仍缺字，应提供两份 PDF 对照字体嵌入与页面表现。
+- macOS 无界面转换显式生成 Fontconfig 配置，加载可用的 LibreOffice／Homebrew 字体规则，以及系统、补充字体、语言资源和当前用户的字体目录。仅对子进程设置环境变量，不修改系统字体或应用包。系统缓存位于 `~/Library/Caches/mathlet/fontconfig`。显式设置的 `FONTCONFIG_FILE` 会作为基础规则继承；无效路径会报错。字体替换仍可能改变排版，需人工检查。
+- 增加针对实测异常的保守拦截：PDF 含中文，但所有字体均落入样本中的 LinuxLibertineG／FrankRuhlHofshi／Carlito 回退组合时，不采用新文件，保留旧预览。这不是完整字形或数学正确性验证，不能检测所有缺字。
 - 转换在独立 Worker 中运行，有独立临时配置、120秒超时及最多120页限制。排队、运行、失败及重试状态可见；预览失败不改变资料 ready 状态。浏览器不支持内嵌 PDF 时使用“单独打开页面预览”或“下载原始文件”。
 - “查看初次提取记录”提供新导入资料的不可变初始正文；旧资料未记录时明确标为未知，不用当前人工修订冒充初始值。原始文件、已有来源ID、人工修改及已交付版本均保留。
 - 表格暂以含换行/制表符的正文提取，配图只读；不支持表格富文本编辑或重绘图形。PDF 按页提取文字，无公式 OCR 和图表拆分，需对照右侧页面补录。详见 FORMULA_REVIEW.md。
