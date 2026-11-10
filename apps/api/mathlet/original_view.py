@@ -35,11 +35,17 @@ def folder_for(document_id):
 def status(document_id):
     document, folder = folder_for(document_id)
     pdf = folder / ("original.pdf" if document['kind'] == 'pdf' else 'original-view.pdf')
-    if pdf.is_file():
-        return {"status": "ready", "pages": len(PdfReader(pdf).pages), "converted": document['kind'] == 'docx'}
+    available = pdf.is_file()
     with connect() as c:
         job = c.execute("SELECT * FROM jobs WHERE document_id=? AND kind='original_view' ORDER BY created_at DESC,rowid DESC LIMIT 1", (document_id,)).fetchone()
-    return {"status": job['status'] if job else 'not_generated', "message": job['message'] if job else '尚未生成原页预览', "pages": 0, "converted": True}
+    state = job['status'] if job else 'not_generated'
+    if available and state not in {'queued', 'running', 'failed'}:
+        state = 'ready'
+    return {"status": state, "available": available,
+            "pages": len(PdfReader(pdf).pages) if available else 0,
+            "version": str(pdf.stat().st_mtime_ns) if available else None,
+            "message": job['message'] if job else '尚未生成原页预览',
+            "converted": document['kind'] == 'docx'}
 
 
 def enqueue(c, document_id):
@@ -54,10 +60,10 @@ def get_status(document_id: str):
 
 
 @router.post('/documents/{document_id}/original-view', status_code=202)
-def request_view(document_id: str):
+def request_view(document_id: str, regenerate: bool = False):
     document, _ = folder_for(document_id)
     current = status(document_id)
-    if current['status'] == 'ready': return current
+    if document['kind'] == 'pdf' or (current['status'] == 'ready' and not regenerate): return current
     if document['status'] != 'ready': raise HTTPException(409, '请等待资料提取完成')
     with connect() as c:
         c.execute('BEGIN IMMEDIATE')
@@ -70,14 +76,13 @@ def view_pdf(document_id: str):
     document, folder = folder_for(document_id)
     path = folder / ('original.pdf' if document['kind'] == 'pdf' else 'original-view.pdf')
     if not path.is_file(): raise HTTPException(404, '原页预览尚未生成')
-    return FileResponse(path, media_type='application/pdf', headers={'Content-Disposition': 'inline'})
+    return FileResponse(path, media_type='application/pdf', headers={'Content-Disposition': 'inline', 'Cache-Control': 'no-store'})
 
 
 def build_view(document_id):
     document, folder = folder_for(document_id)
     if document['kind'] == 'pdf': return
     target = folder / 'original-view.pdf'
-    if target.is_file(): return
     executable = converter()
     if not executable:
         raise ValueError('未找到 LibreOffice。请安装后重试；可设置 MATHLET_SOFFICE 为 soffice 可执行文件路径。原件与提取结果不受影响。')

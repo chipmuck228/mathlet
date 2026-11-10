@@ -21,3 +21,21 @@ it("shows conversion failures with a retry, without fabricating original-page ev
   fireEvent.click(screen.getByRole("button", { name: "重试生成原文预览" }))
   await waitFor(() => expect(vi.mocked(api)).toHaveBeenCalledWith("/documents/doc/original-view", { method: "POST" }))
 })
+
+it("regenerates an existing preview while retaining the old PDF and showing progress", async () => {
+  vi.mocked(api).mockResolvedValue({ status: "ready", available: true, pages: 2, version: "old" })
+  render(<OriginalDocument documentId="doc" kind="docx" />)
+  await waitFor(() => expect(screen.getByRole("button", { name: "重新生成原文预览" })).toBeTruthy())
+  vi.mocked(api).mockResolvedValueOnce({ status: "queued", available: true, pages: 2, version: "old", message: "等待 Worker" })
+  fireEvent.click(screen.getByRole("button", { name: "重新生成原文预览" }))
+  await waitFor(() => expect(vi.mocked(api)).toHaveBeenCalledWith("/documents/doc/original-view?regenerate=true", { method: "POST" }))
+  expect(screen.getByTitle("原始文档页面预览").getAttribute("src")).toContain("?v=old#page=1")
+  expect((screen.getByRole("button", { name: "正在重新生成…" }) as HTMLButtonElement).disabled).toBe(true)
+})
+it("keeps a failed regeneration's old PDF readable and offers another attempt", async () => {
+  vi.mocked(api).mockResolvedValue({ status: "failed", available: true, pages: 2, version: "old", message: "转换失败" })
+  render(<OriginalDocument documentId="doc" kind="docx" />)
+  await waitFor(() => expect(screen.getByRole("button", { name: "重新生成原文预览" })).toBeTruthy())
+  expect(screen.getByTitle("原始文档页面预览")).toBeTruthy()
+  expect(screen.getByText(/重新生成失败，保留上次预览/)).toBeTruthy()
+})
