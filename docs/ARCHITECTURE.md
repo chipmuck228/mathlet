@@ -63,3 +63,12 @@ Worker 重启获得独占锁后将运行中任务重新排队，从文件读取�
 公式迁移版本2增加 blocks.original_content 与 formula_candidates。原生 OMML 转显式 LaTeX，正文使用明确公式边界，API派生内容分段及安全 MathML。保存草稿允许待修正表达式，但确认来源与批准正文时校验支持范围和可渲染性。转换不支持时保留提示，不把 token 拼接作为成功。
 
 重新提取按原文档块ordinal关联既有ID，只写候选及基准修订，不触碰当前正文和批准。应用候选仍走原编辑接口与并发检查。新交付保存 format_version=2 和固定渲染HTML，旧交付默认使用旧转义文本格式。MathML通过限制性转换器产生，无脚本、外链或事件属性。
+
+
+## 0.3 知识草案
+
+增量迁移版本4增加knowledge_units、knowledge_runs、knowledge_candidates、knowledge_candidate_history、knowledge_calls、knowledge_versions。现有表不删除。知识任务与原件Job分开，仍由同一独占Worker执行；原件队列空闲后处理知识队列。知识重启标为interrupted，不自动重发可能计费的调用。
+
+模型适配器采用标准库HTTP，支持OpenAI兼容Chat Completions，不增加第三方依赖。密钥保存在data下的本地配置文件，不返回前端或放入任务记录。API位于/api/knowledge，具体契约见KNOWLEDGE_CONTRACT.md。
+
+范围变化令旧知识任务过期，人工编辑撤销该条目确认；知识快照不可变。阶段1没有把知识表接入旧Draft依赖，不能用知识审核绕过原有小册子批准流程。完整关系网络、题目包和解题路径仍未实现。

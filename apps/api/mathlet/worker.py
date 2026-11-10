@@ -8,6 +8,7 @@ from filelock import FileLock, Timeout
 from .db import connect, data_dir, init_db, now
 from .ingest import extract
 from .original_view import build_view, enqueue
+from .knowledge_worker import run_one_knowledge, recover_knowledge
 
 
 def run_one():
@@ -15,7 +16,8 @@ def run_one():
         c.execute("BEGIN IMMEDIATE")
         row = c.execute("SELECT * FROM jobs WHERE status='queued' ORDER BY CASE WHEN kind='ingest' THEN 0 ELSE 1 END, created_at LIMIT 1").fetchone()
         if not row:
-            return False
+            c.rollback()
+            return run_one_knowledge()
         c.execute("UPDATE jobs SET status='running',message='正在读取原件',updated_at=? WHERE id=?", (now(), row["id"]))
         document = c.execute("SELECT * FROM documents WHERE id=?", (row["document_id"],)).fetchone()
     folder = data_dir() / "documents" / document["id"]
@@ -52,6 +54,7 @@ def main():
     init_db()
     try:
         with FileLock(str(data_dir() / "worker.lock"), timeout=0):
+            recover_knowledge()
             with connect() as c:
                 c.execute("UPDATE jobs SET status='queued',message='Worker 重启后重新读取',updated_at=? WHERE status='running'", (now(),))
             running = True

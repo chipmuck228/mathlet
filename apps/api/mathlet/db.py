@@ -98,6 +98,9 @@ def init_db():
         )""")
         if "original_text" not in columns:
             c.execute("ALTER TABLE blocks ADD COLUMN original_text TEXT")
+        from .knowledge_models import init_knowledge
+        init_knowledge(c)
+        c.execute("INSERT OR IGNORE INTO schema_migrations VALUES(4,?)", (now(),))
         c.execute("INSERT OR IGNORE INTO schema_migrations VALUES(3,?)", (now(),))
         c.execute("INSERT OR IGNORE INTO schema_migrations VALUES(2,?)", (now(),))
 

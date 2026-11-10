@@ -9,6 +9,8 @@ from typing import Literal
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.exceptions import RequestValidationError
+from fastapi.exception_handlers import request_validation_exception_handler
 from pydantic import BaseModel, Field
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
@@ -22,8 +24,15 @@ async def lifespan(_):
     yield
 
 
-app = FastAPI(title="Mathlet", version="0.2.0", lifespan=lifespan)
+app = FastAPI(title="Mathlet", version="0.3.0", lifespan=lifespan)
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1", "testserver"])
+@app.exception_handler(RequestValidationError)
+async def redact_provider_validation(request: Request, exc: RequestValidationError):
+    if request.url.path == '/api/knowledge/provider':
+        return JSONResponse({'detail': [{'loc': error['loc'], 'msg': error['msg'], 'type': error['type']} for error in exc.errors()]}, status_code=422)
+    return await request_validation_exception_handler(request, exc)
+
+
 ALLOWED_ORIGINS = {f"http://{host}:{port}" for host in ("localhost", "127.0.0.1") for port in (5173, 8000)}
 
 
@@ -52,7 +61,7 @@ def require_revision(row, revision):
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "version": "0.2.0", "generation_mode": "editorial_scaffold", "model_connected": False}
+    return {"ok": True, "version": "0.3.0", "generation_mode": "knowledge_drafting_and_editorial_scaffold", "model_connected": False}
 
 
 @app.get("/api/documents")
@@ -381,6 +390,9 @@ app.include_router(formula_router)
 
 from .original_view import router as original_view_router
 app.include_router(original_view_router)
+
+from .knowledge import router as knowledge_router
+app.include_router(knowledge_router)
 
 web = ROOT / "apps" / "web" / "dist"
 if web.is_dir():

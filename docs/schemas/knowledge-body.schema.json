@@ -1,0 +1,75 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "name": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Name",
+      "type": "string"
+    },
+    "kind": {
+      "enum": [
+        "concept",
+        "property",
+        "theorem",
+        "method"
+      ],
+      "title": "Kind",
+      "type": "string"
+    },
+    "statement": {
+      "maxLength": 6000,
+      "title": "Statement",
+      "type": "string"
+    },
+    "conditions": {
+      "maxLength": 3000,
+      "title": "Conditions",
+      "type": "string"
+    },
+    "formula": {
+      "default": "",
+      "maxLength": 6000,
+      "title": "Formula",
+      "type": "string"
+    },
+    "positive_example": {
+      "maxLength": 4000,
+      "title": "Positive Example",
+      "type": "string"
+    },
+    "misconception": {
+      "maxLength": 4000,
+      "title": "Misconception",
+      "type": "string"
+    },
+    "mastery": {
+      "maxLength": 3000,
+      "title": "Mastery",
+      "type": "string"
+    },
+    "method_steps": {
+      "default": "",
+      "maxLength": 4000,
+      "title": "Method Steps",
+      "type": "string"
+    },
+    "uncertainty": {
+      "default": "",
+      "maxLength": 2000,
+      "title": "Uncertainty",
+      "type": "string"
+    }
+  },
+  "required": [
+    "name",
+    "kind",
+    "statement",
+    "conditions",
+    "positive_example",
+    "misconception",
+    "mastery"
+  ],
+  "title": "KnowledgeBody",
+  "type": "object"
+}

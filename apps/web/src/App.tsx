@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { BookOpen, Check, FileCheck2, Files, GitBranch, ListTree, Loader2, MessageSquare, Package, Plus, RefreshCw, Upload } from "lucide-react"
 import PlanningPage from "./PlanningPage"
+import KnowledgePage from "./KnowledgePage"
 import ContinuousReview from "./ContinuousReview"
 import { Button } from "@/components/ui/button"
 import { api, json, type Block, type Comment, type Document, type Draft, type Job, type Release } from "@/lib/api"
@@ -9,6 +10,7 @@ const stages = [
   { id: "materials", label: "资料包", icon: Files },
   { id: "sources", label: "原题核对", icon: FileCheck2 },
   { id: "planning", label: "内容规划", icon: ListTree },
+  { id: "knowledge", label: "知识与关系", icon: BookOpen },
   { id: "tasks", label: "任务与生成", icon: GitBranch },
   { id: "editor", label: "编辑与评审", icon: MessageSquare },
   { id: "preview", label: "小册子预览", icon: BookOpen },
@@ -80,6 +82,7 @@ export default function App() {
   const [documentId, setDocumentId] = useState("")
   const [blocks, setBlocks] = useState<Block[]>([])
   const [sourceDirty, setSourceDirty] = useState(false)
+  const [knowledgeDirty, setKnowledgeDirty] = useState(false)
   const [requestedBlockId, setRequestedBlockId] = useState("")
   const [draftId, setDraftId] = useState("")
   const [selected, setSelected] = useState<string[]>([])
@@ -136,6 +139,7 @@ export default function App() {
     } catch (e) { setMessage(String(e)) } finally { setBusy(false) }
   }
   function navigate(next: string) {
+    if (stage === "knowledge" && knowledgeDirty && next !== stage && !window.confirm("有未保存的知识修改，离开会丢弃。继续？")) return
     if (stage === "sources" && sourceDirty && next !== stage && !window.confirm("有未保存的核对修改，离开将丢弃这些修改。继续？")) return
     if (["editor", "planning"].includes(stage) && next !== stage && !window.confirm("离开前，请确认修改已经保存。继续切换？")) return
     setStage(next); setMessage("")
@@ -145,15 +149,16 @@ export default function App() {
     <aside className="sidebar"><a className="brand" href="/">mathlet<span>数学小册子编辑工作台</span></a>
       <div className="sidebar-caption">内容生产</div><nav aria-label="工作区">{stages.map(({ id, label, icon: Icon }, i) => <button key={id} className={stage === id ? "active" : ""} onClick={() => navigate(id)} aria-current={stage === id ? "page" : undefined}><Icon size={17} /><span>{label}</span><small>0{i + 1}</small></button>)}</nav>
       <div className="sidebar-footer"><span className={online ? "dot online" : "dot"} />{online ? "本地服务已连接" : "等待本地 API"}<p>资料留存在本机<br />代码通过 GitHub 管理</p></div></aside>
-    <div className="workspace"><header className="workspace-header"><span>Mathlet / {stages.find(s => s.id === stage)?.label}</span><span className="label">本地版 · 0.2</span></header>
-      <main><div className="intro"><div><p className="eyebrow">理解知识 · 发现连接 · 建立思路</p><h1>{({ materials: "从可信资料开始。", sources: "让每个条件都准确。", planning: "把知识组织成复习路径。", tasks: "把生成过程留在记录里。", editor: "让思路经得起检查。", preview: "回到学生的阅读视角。", releases: "交付一个确定的版本。" } as Record<string, string>)[stage]}</h1></div><Button variant="outline" size="sm" onClick={() => void refresh()}><RefreshCw />刷新列表</Button></div>
+    <div className="workspace"><header className="workspace-header"><span>Mathlet / {stages.find(s => s.id === stage)?.label}</span><span className="label">本地版 · 0.3</span></header>
+      <main><div className="intro"><div><p className="eyebrow">理解知识 · 发现连接 · 建立思路</p><h1>{({ materials: "从可信资料开始。", sources: "让每个条件都准确。", planning: "把知识组织成复习路径。", knowledge: "从知识草案到教师确认。", tasks: "把生成过程留在记录里。", editor: "让思路经得起检查。", preview: "回到学生的阅读视角。", releases: "交付一个确定的版本。" } as Record<string, string>)[stage]}</h1></div><Button variant="outline" size="sm" onClick={() => void refresh()}><RefreshCw />刷新列表</Button></div>
       {!online && <div className="notice" role="alert">尚未连接 API。请按 README 启动 FastAPI（8000）和 Worker；前端通过 Vite 代理访问。</div>}
       <Message value={message} />
+      {stage === "knowledge" && <KnowledgePage onDirtyChange={setKnowledgeDirty} />}
       {stage === "materials" && <>
         <div className="upload-area"><Upload size={25} /><h2>加入你的资料包</h2><p className="muted">DOCX 或 PDF，单份不超过30MB。保留原件，不要求先整理教材版本。</p><div className="actions"><select aria-label="资料类别" value={category} onChange={e => setCategory(e.target.value)}>{Object.entries(categories).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select><label className={`upload-label ${busy ? "opacity-50" : ""}`}>选择文件<input aria-label="上传资料文件" type="file" accept=".docx,.pdf" multiple disabled={busy || !online} onChange={e => { void upload(e.target.files); e.target.value = "" }} /></label></div></div>
         <div className="section-heading mt-8"><h2>本机资料</h2><span className="muted small">{documents.length} 份</span></div>
         {!documents.length ? <div className="empty"><Files /><h3>还没有资料</h3><p>可以先上传你提供的模拟试卷，测试题干、公式与配图的核对流程。</p></div> : <div className="document-list">{documents.map(d => <div className="document-row" key={d.id}><div className="file-symbol">{d.kind.toUpperCase()}</div><div className="min-w-0 flex-1"><h3>{d.name}</h3><p className="muted small">{categories[d.category as keyof typeof categories]} · {date(d.created_at)}</p></div><span className="label">{statuses[d.status]}</span><Button variant="outline" size="sm" onClick={() => { setDocumentId(d.id); setStage("sources") }}>核对</Button></div>)}</div>}
-        <p className="muted small mt-6">原件、数据库和交付文件位于本地 data 目录，默认不会进入 Git。当前版本未接入模型或外部 OCR，不会自动发送资料。</p>
+        <p className="muted small mt-6">原件、数据库和交付文件位于本地 data 目录，默认不会进入 Git。资料读取不发送原件给模型。知识草案可在“知识与关系”配置服务并显式触发；外部 OCR 尚未接入。</p>
       </>}
       {stage === "sources" && <>
         <div className="actions mb-5"><select aria-label="选择资料" value={documentId} onChange={e => { if (!sourceDirty || window.confirm("有未保存的核对修改，切换将丢弃。继续？")) { setRequestedBlockId(""); setDocumentId(e.target.value) } }}><option value="">选择资料</option>{documents.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></div>
@@ -163,7 +168,7 @@ export default function App() {
       </>}
       {stage === "planning" && <PlanningPage documents={documents} openSource={(doc, block) => { setRequestedBlockId(block); setDocumentId(doc); setStage("sources") }} openDraft={d => { setDraftId(d.id); void refresh(); setStage("editor") }} />}
       {stage === "tasks" && <>
-        <div className="notice">本阶段自动执行真实文件读取。数学 Agent、OCR 和自动分题尚未接入；“创建提纲”只组织人工已确认的来源，不生成解答。</div>
+        <div className="notice">本页管理文件读取与人工试题提纲。“知识与关系”已提供真实知识草案 Agent；单题解法、OCR 和自动分题尚未接入，“创建提纲”仍不生成解答。</div>
         <section className="surface"><h2>文件读取任务</h2>{jobs.length ? jobs.map(j => <div className="job" key={j.id}><div><h3>{j.name}</h3><p className="muted small">{j.message}</p></div><span className="label">{statuses[j.status]}</span>{j.status === "failed" && <Button variant="outline" size="sm" onClick={async () => { try { await api(`/jobs/${j.id}/retry`, { method: "POST" }); await refresh() } catch (e) { setMessage(String(e)) } }}>重试</Button>}</div>) : <p className="muted">上传资料后，任务会保存在本机数据库中。</p>}</section>
         <section className="surface"><h2>从已核对内容建立单元</h2><p className="muted small">来源选择与“原题核对”页当前资料一致。支持跨内容块组合；跨文档组合将在后续完善。</p>
           <select aria-label="选择提纲来源资料" value={documentId} onChange={e => setDocumentId(e.target.value)}><option value="">选择资料</option>{documents.filter(d => d.status === "ready").map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select>
