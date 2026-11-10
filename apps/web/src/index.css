@@ -16,3 +16,6 @@ body{--keyboard-zindex:2100}
 .knowledge-item{border-top:1px solid var(--border);padding:25px 0;margin-top:18px}.knowledge-item .continuous-text{width:100%!important;min-height:90px}.knowledge-item details{font-size:12px;margin-top:12px}.knowledge-json{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;max-height:420px;overflow:auto}.knowledge-formula{padding:15px;background:#f1f5eb;overflow:auto}.knowledge-message{position:sticky;bottom:16px;box-shadow:0 4px 20px #172d251f;z-index:20}.knowledge-page>details>summary{cursor:pointer}.knowledge-page .job pre{max-width:45%;white-space:pre-wrap;font-size:11px}.knowledge-page label>input[type=number]{max-width:110px}
 
 .knowledge-fieldset{border:0;padding:0;margin:0;min-width:0}
+
+.readable-math { white-space: pre-wrap; overflow-wrap: anywhere; }
+.knowledge-formula { overflow-x: auto; padding: 0.75rem 0; font-size: 1.15rem; }

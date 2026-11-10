@@ -62,6 +62,7 @@ it("does not approve unselected or unsaved content and submits exact revisions",
  fireEvent.click(screen.getByLabelText(/我已检查选中条目的表述/))
  const approve=screen.getByRole("button",{name:"确认选中 1 项"}) as HTMLButtonElement
  expect(approve.disabled).toBe(false)
+ fireEvent.click(screen.getByRole("button",{name:"编辑知识内容"}))
  fireEvent.change(screen.getByLabelText("准确表述"),{target:{value:"教师尚未保存的修改"}})
  expect(approve.disabled).toBe(true)
  expect(screen.getByText(/未保存；保存会撤销/)).toBeTruthy()
@@ -85,6 +86,7 @@ it("preserves an unsaved local item when polling receives an external revision",
  await waitFor(()=>expect(screen.getByLabelText("知识候选批次").querySelector('option[value="r"]')).toBeTruthy())
  vi.useFakeTimers()
  await act(async()=>{fireEvent.change(screen.getByLabelText("知识候选批次"),{target:{value:"r"}})})
+ fireEvent.click(screen.getByRole("button",{name:"编辑知识内容"}))
  const input=screen.getByLabelText("准确表述") as HTMLTextAreaElement
  fireEvent.change(input,{target:{value:"尚未保存的教师文字"}})
  run.items=[{...item,revision:2,body:{...body,statement:"其他页面的新修订"}}];run.revision=5
