@@ -82,6 +82,8 @@ export default function App() {
   const [documentId, setDocumentId] = useState("")
   const [blocks, setBlocks] = useState<Block[]>([])
   const [sourceDirty, setSourceDirty] = useState(false)
+  const [requestedKnowledgeUnit,setRequestedKnowledgeUnit]=useState("")
+  const [planningDirty,setPlanningDirty]=useState(false)
   const [knowledgeDirty, setKnowledgeDirty] = useState(false)
   const [requestedBlockId, setRequestedBlockId] = useState("")
   const [draftId, setDraftId] = useState("")
@@ -139,6 +141,7 @@ export default function App() {
     } catch (e) { setMessage(String(e)) } finally { setBusy(false) }
   }
   function navigate(next: string) {
+    if (stage === "planning" && planningDirty && next !== stage && !window.confirm("有未保存的规划修改，离开会丢弃。继续？")) return
     if (stage === "knowledge" && knowledgeDirty && next !== stage && !window.confirm("有未保存的知识修改，离开会丢弃。继续？")) return
     if (stage === "sources" && sourceDirty && next !== stage && !window.confirm("有未保存的核对修改，离开将丢弃这些修改。继续？")) return
     if (["editor", "planning"].includes(stage) && next !== stage && !window.confirm("离开前，请确认修改已经保存。继续切换？")) return
@@ -153,7 +156,7 @@ export default function App() {
       <main><div className="intro"><div><p className="eyebrow">理解知识 · 发现连接 · 建立思路</p><h1>{({ materials: "从可信资料开始。", sources: "让每个条件都准确。", planning: "把知识组织成复习路径。", knowledge: "从知识草案到教师确认。", tasks: "把生成过程留在记录里。", editor: "让思路经得起检查。", preview: "回到学生的阅读视角。", releases: "交付一个确定的版本。" } as Record<string, string>)[stage]}</h1></div><Button variant="outline" size="sm" onClick={() => void refresh()}><RefreshCw />刷新列表</Button></div>
       {!online && <div className="notice" role="alert">尚未连接 API。请按 README 启动 FastAPI（8000）和 Worker；前端通过 Vite 代理访问。</div>}
       <Message value={message} />
-      {stage === "knowledge" && <KnowledgePage onDirtyChange={setKnowledgeDirty} />}
+      {stage === "knowledge" && <KnowledgePage initialUnitId={requestedKnowledgeUnit} onDirtyChange={setKnowledgeDirty} />}
       {stage === "materials" && <>
         <div className="upload-area"><Upload size={25} /><h2>加入你的资料包</h2><p className="muted">DOCX 或 PDF，单份不超过30MB。保留原件，不要求先整理教材版本。</p><div className="actions"><select aria-label="资料类别" value={category} onChange={e => setCategory(e.target.value)}>{Object.entries(categories).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select><label className={`upload-label ${busy ? "opacity-50" : ""}`}>选择文件<input aria-label="上传资料文件" type="file" accept=".docx,.pdf" multiple disabled={busy || !online} onChange={e => { void upload(e.target.files); e.target.value = "" }} /></label></div></div>
         <div className="section-heading mt-8"><h2>本机资料</h2><span className="muted small">{documents.length} 份</span></div>
@@ -166,7 +169,7 @@ export default function App() {
         {document && blocks.length > 0 && <ContinuousReview key={documentId} blocks={blocks} documentId={documentId} kind={document.kind} focusId={requestedBlockId} onDirtyChange={setSourceDirty} onSaved={saved => { const updates = new Map(saved.map(b => [b.id, b])); setBlocks(old => old.map(b => updates.get(b.id) || b)); void refresh() }} />}
         {!document && <div className="empty"><FileCheck2 /><p>选择资料，连续阅读并编辑左侧内容，右侧对照原始证据。</p></div>}
       </>}
-      {stage === "planning" && <PlanningPage documents={documents} openSource={(doc, block) => { setRequestedBlockId(block); setDocumentId(doc); setStage("sources") }} openDraft={d => { setDraftId(d.id); void refresh(); setStage("editor") }} />}
+      {stage === "planning" && <PlanningPage onDirtyChange={setPlanningDirty} openKnowledge={id=>{setRequestedKnowledgeUnit(id);setStage("knowledge")}} documents={documents} openSource={(doc, block) => { setRequestedBlockId(block); setDocumentId(doc); setStage("sources") }} openDraft={d => { setDraftId(d.id); void refresh(); setStage("editor") }} />}
       {stage === "tasks" && <>
         <div className="notice">本页管理文件读取与人工试题提纲。“知识与关系”已提供真实知识草案 Agent；单题解法、OCR 和自动分题尚未接入，“创建提纲”仍不生成解答。</div>
         <section className="surface"><h2>文件读取任务</h2>{jobs.length ? jobs.map(j => <div className="job" key={j.id}><div><h3>{j.name}</h3><p className="muted small">{j.message}</p></div><span className="label">{statuses[j.status]}</span>{j.status === "failed" && <Button variant="outline" size="sm" onClick={async () => { try { await api(`/jobs/${j.id}/retry`, { method: "POST" }); await refresh() } catch (e) { setMessage(String(e)) } }}>重试</Button>}</div>) : <p className="muted">上传资料后，任务会保存在本机数据库中。</p>}</section>

@@ -31,7 +31,11 @@ def origin_stale(c, unit):
 def current(c, run):
     unit=row(c,'knowledge_units',run['unit_id'])
     if unit['revision']!=run['input_revision'] or origin_stale(c,unit): return False
-    meta=json.loads(run['input_json']).get('action_task')
+    snapshot=json.loads(run['input_json'])
+    if snapshot.get('planning_task'):
+        from .planning_ai import sources_current
+        return sources_current(c,snapshot)
+    meta=snapshot.get('action_task')
     if meta:
         parent=c.execute('SELECT * FROM knowledge_runs WHERE id=?',(meta['base_run_id'],)).fetchone()
         return bool(parent) and parent['revision']==meta['base_revision'] and parent['input_revision']==unit['revision']
@@ -100,7 +104,7 @@ def configure_provider(body: Provider): return save_provider(body)
 
 @router.get('/units')
 def units():
-    with connect() as c: return [unit_json(c,r) for r in c.execute('SELECT * FROM knowledge_units ORDER BY created_at DESC')]
+    with connect() as c: return [unit_json(c,r) for r in c.execute('SELECT * FROM knowledge_units ORDER BY created_at DESC') if not json.loads(r['origin']).get('internal_planning')]
 
 @router.post('/units',status_code=201)
 def create_unit(body: UnitInput):
@@ -125,9 +129,18 @@ def from_plan(body: PlanUnitInput):
         payload=json.loads(plan['payload']); source=next((u for u in payload['units'] if u['id']==body.unit_id),None)
         if not source: raise HTTPException(404,'规划单元不存在')
         selected=set(source.get('node_ids',[]))
+        if payload.get('mode')=='ai_curriculum':
+            nodes={n['id']:n for n in payload['nodes']}
+            if not selected or any(not nodes[k]['included'] or not nodes[nodes[k]['parent_id']]['included'] for k in selected): raise HTTPException(422,'此二级主题或所属领域未纳入规划')
+        for previous in c.execute('SELECT * FROM knowledge_units'):
+            old_origin=json.loads(previous['origin'])
+            if old_origin.get('plan_id')==body.plan_id and old_origin.get('unit_id')==body.unit_id and old_origin.get('plan_revision')==body.plan_revision:
+                return unit_json(c,previous)
         titles=[n['title'] for n in payload['nodes'] if n['id'] in selected]
         body_unit=UnitInput(title=source['title'],chapters=titles or [source['title']],notes=source.get('goals',''))
         key=uid();origin={'plan_id':body.plan_id,'unit_id':body.unit_id,'plan_revision':body.plan_revision}
+        origin['learning_requirements']=[{'text':r['text'],'source_id':r['source_id'],'origin':r.get('origin','official_excerpt')} for r in payload['requirements'] if body.unit_id in r['unit_ids']]
+        origin['domain']=source.get('volume','')
         c.execute('INSERT INTO knowledge_units(id,title,chapters,target,notes,origin,created_at) VALUES(?,?,?,?,?,?,?)',
             (key,body_unit.title,packed(body_unit.chapters),body_unit.target,body_unit.notes,packed(origin),now()))
         return unit_json(c,row(c,'knowledge_units',key))
@@ -164,7 +177,8 @@ def start_run(unit_id:str,body:RunInput):
             if not catalog: raise HTTPException(422,'原任务尚无清单，请先重试或重新生成清单')
         snapshot={'schema_version':1,'prompt_version':'knowledge-v1','title':unit['title'],'chapters':json.loads(unit['chapters']),
             'target':unit['target'],'notes':unit['notes'],'max_items':body.max_items,
-            'basis':'model_prior','official_coverage_verified':False,'origin':json.loads(unit['origin'])}
+            'basis':'model_prior','official_coverage_verified':False,'origin':json.loads(unit['origin']),
+            'learning_requirements':json.loads(unit['origin']).get('learning_requirements',[])}
         key=uid();state='awaiting_selection' if catalog else 'queued'
         c.execute('INSERT INTO knowledge_runs(id,unit_id,input_revision,input_json,model_json,status,stage,catalog,base_run_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)',
             (key,unit_id,unit['revision'],packed(snapshot),packed(public_provider(provider)),state,'details' if catalog else 'catalog',packed(catalog),body.base_run_id,now(),now()))

@@ -136,7 +136,9 @@ def edit_output(output_id:str,body:OutputEdit):
     with connect() as c:
         c.execute('BEGIN IMMEDIATE');value=row(c,'knowledge_outputs',output_id);revision(value,body.revision);run=row(c,'knowledge_runs',value['run_id'])
         if not current(c,run) or run['status']!='completed' or value['state']!='pending': raise HTTPException(409,'结果已处理或来源过期')
-        schema={'knowledge':KnowledgeProposal,'relation':Relation,'coverage':Gap}[value['type']]
+        schemas={'knowledge':KnowledgeProposal,'relation':Relation,'coverage':Gap}
+        if value['type'] not in schemas: raise HTTPException(422,'此结果请在内容规划中编辑')
+        schema=schemas[value['type']]
         try: valid=schema.model_validate(body.body).model_dump()
         except ValueError: raise HTTPException(422,'候选内容结构无效') from None
         validate_references(json.loads(run['input_json'])['action_task'],value['type'],valid)

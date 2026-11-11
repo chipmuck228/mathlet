@@ -97,6 +97,11 @@ def proposal(document, blocks):
 
 
 def warnings_for(payload):
+    if payload.get('mode')=='ai_curriculum':
+        messages=['AI提出分类与主题，学习目标对应为建议；引用来自导入资料，不代表已核验教育部原文或全册完整覆盖。']
+        if payload.get('unreferenced_sources'): messages.append(f"有 {len(payload['unreferenced_sources'])} 个来源块未被引用，请核对是否为说明、表头或遗漏。")
+        if any(not u['goals'].strip() for u in payload['units']): messages.append('部分二级主题尚未填写学习目标对应建议。')
+        return messages
     messages, numbers = [], {}
     for n in payload["nodes"]:
         match = CHAPTER.match(n["title"])
@@ -119,7 +124,7 @@ def plan_json(c, record):
     result = dict(record)
     result["payload"] = json.loads(result["payload"])
     changes = []
-    requirements = {r["source_id"] for r in result["payload"]["requirements"]}
+    requirements = {r["source_id"] for r in result["payload"]["requirements"] if r.get("origin","official_excerpt")=="official_excerpt"}
     for key, revision in result["payload"]["source_revisions"].items():
         source = c.execute("SELECT revision,text,verified FROM blocks WHERE id=?", (key,)).fetchone()
         digest = result["payload"].get("source_hashes", {}).get(key)
@@ -161,11 +166,12 @@ def list_plans():
 class Node(BaseModel):
     id: str = Field(min_length=1, max_length=80)
     parent_id: str | None
-    kind: Literal["book", "chapter", "section", "topic", "activity"]
+    kind: Literal["book", "chapter", "section", "topic", "activity", "domain"]
     title: str = Field(min_length=1, max_length=300)
     source_id: str | None = None
     source_url: str = Field(default="", max_length=2000)
     included: bool = True
+    source_excerpt: str = Field(default="",max_length=5000)
 
 
 class Unit(BaseModel):
@@ -178,6 +184,7 @@ class Unit(BaseModel):
 
 
 class Requirement(BaseModel):
+    origin: Literal["official_excerpt","source_excerpt"] = "official_excerpt"
     id: str = Field(min_length=1, max_length=80)
     text: str = Field(min_length=1, max_length=5000)
     source_id: str
@@ -226,16 +233,28 @@ def edit_plan(plan_id: str, body: PlanEdit):
                 raise HTTPException(422, "来源链接只允许 http 或 https")
             if (n.id in original_nodes and n.source_id != original_nodes[n.id]["source_id"]) or (n.id not in original_nodes and n.source_id):
                 raise HTTPException(422, "导入条目的来源不可更换；新增条目应标记为人工补充")
+        if payload.get('mode')=='ai_curriculum':
+            for n in body.nodes:
+                if len(n.title)>160: raise HTTPException(422,'领域和主题名称不超过160字')
+                if n.kind=='domain' and n.parent_id is not None or n.kind=='topic' and (n.parent_id is None or node_map[n.parent_id].kind!='domain') or n.kind not in {'domain','topic'}:
+                    raise HTTPException(422,'AI规划采用领域—二级主题两级结构')
+                if n.source_excerpt and (not n.source_id or n.source_excerpt not in row(c,'blocks',n.source_id)['text']): raise HTTPException(422,'来源引文须逐字来自绑定资料')
+            for u in body.units:
+                if len(u.node_ids)!=1 or node_map[u.node_ids[0]].kind!='topic': raise HTTPException(422,'每个AI规划单元应对应一个二级主题')
+                topic=node_map[u.node_ids[0]];u.title=topic.title;u.volume=node_map[topic.parent_id].title
+            if len({u.node_ids[0] for u in body.units})!=len(body.units): raise HTTPException(422,'同一二级主题不能重复建立单元')
+            if {u.node_ids[0] for u in body.units}!={n.id for n in body.nodes if n.kind=='topic'}: raise HTTPException(422,'每个二级主题都需保留对应单元与目标')
         active = {n.id for n in body.nodes if n.included}
         for u in body.units:
-            if not set(u.node_ids) <= active:
+            if payload.get("mode")!="ai_curriculum" and not set(u.node_ids) <= active:
                 raise HTTPException(422, "单元只能关联当前纳入的目录条目")
         snapshot = dict(payload["source_revisions"])
         hashes = dict(payload.get("source_hashes", {}))
         for req in body.requirements:
             source = row(c, "blocks", req.source_id)
             doc = row(c, "documents", source["document_id"])
-            if doc["category"] != "standard" or not source["verified"]:
+            if req.origin=="source_excerpt" and (payload.get("mode")!="ai_curriculum" or source["document_id"]!=payload["document_id"]): raise HTTPException(422,"资料摘要引用只能来自本规划的导入资料")
+            if req.origin=="official_excerpt" and (doc["category"] != "standard" or not source["verified"]):
                 raise HTTPException(422, "课标要求必须来自已核对的课标／考纲资料")
             if req.text not in source["text"]:
                 raise HTTPException(422, "请从已核对课标文本中逐字摘录要求，不能自动编造课标")
@@ -267,6 +286,8 @@ def confirm_plan(plan_id: str, body: ConfirmPlan):
         state = plan_json(c, old)
         if state["stale_sources"]:
             raise HTTPException(409, "来源变更，不能确认旧规划")
+        if state['payload'].get('mode')=='ai_curriculum' and not any(n['kind']=='topic' and n['included'] and next(d['included'] for d in state['payload']['nodes'] if d['id']==n['parent_id']) for n in state['payload']['nodes']):
+            raise HTTPException(422,'至少需要一个纳入的二级主题')
         if not body.acknowledged or not body.reviewer.strip():
             raise HTTPException(422, "请确认已核对结构和疑问，并填写确认人")
         c.execute("UPDATE plans SET confirmed_revision=revision,reviewer=? WHERE id=?", (body.reviewer.strip(), plan_id))
