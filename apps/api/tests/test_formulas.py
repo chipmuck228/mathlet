@@ -107,3 +107,46 @@ def test_deepseek_circle_and_number_set_commands_render_without_rewriting(client
         assert parts_from_text(r'\('+latex+r'\)',strict=True)[0]['latex']==latex
     for latex in [r'\href{javascript:alert(1)}{x}',r'\htmlClass{bad}{x}',r'\newcommand{\x}{x}',r'\unknown{x}']:
         assert client.post('/api/formulas/preview',json={'latex':latex}).status_code==422
+
+
+@pytest.mark.parametrize('latex,symbol,tag',[
+    (r'a\iff b','⟺',None),
+    (r'x\rightarrow 0','→',None),
+    (r'a\Rightarrow b','⇒',None),
+    (r'\underbrace{x+x}_{2\text{项}}','⏟','munder'),
+    (r'\overbrace{x+x}^{2\text{项}}','⏞','mover'),
+    (r'\overset{a}{=}','=', 'mover'),
+    (r'\underset{x}{\min}','min','munder'),
+    (r'\alpha+\beta\notin\mathbb{R}','ℝ',None),
+    (r'\angle ABC\cong\angle DEF','∠',None),
+    (r'\operatorname{max}(x,y)','max',None),
+    (r'\begin{pmatrix}a&b\\c&d\end{pmatrix}','a','mtable'),
+])
+def test_standard_math_dialect_symbols_and_structures(client,latex,symbol,tag):
+    from lxml import etree as ET
+    response=client.post('/api/formulas/preview',json={'latex':latex})
+    assert response.status_code==200,response.text
+    root=ET.fromstring(response.json()['mathml'].encode())
+    assert symbol in ''.join(root.itertext())
+    if tag: assert root.findall('.//{http://www.w3.org/1998/Math/MathML}'+tag)
+    assert not any('\\' in (node.text or '') and '\\'+latex.lstrip('\\').split('{')[0] in (node.text or '') for node in root.iter())
+
+
+def test_formula_capabilities_and_residual_command_detection(client,monkeypatch):
+    import mathlet.formulas as formulas
+    capabilities=client.get('/api/formulas/capabilities').json()
+    assert not capabilities['full_tex']
+    assert {'iff','underbrace','rightarrow','mathbb'}<=set(capabilities['commands'])
+    assert not {'href','includegraphics','newcommand','htmlClass'}&set(capabilities['commands'])
+    # A converter upgrade must not silently echo a command and pass as rendered math.
+    monkeypatch.setattr(formulas,'convert',lambda _: '<math xmlns="http://www.w3.org/1998/Math/MathML"><mi>\\rightarrow</mi></math>')
+    assert client.post('/api/formulas/preview',json={'latex':r'x\rightarrow 0'}).status_code==422
+
+
+@pytest.mark.parametrize('latex',[
+    r'\href{https://example.com}{x}',r'\htmlStyle{color:red}{x}',
+    r'\input{secret}',r'\newcommand{\x}{x}',r'\unknown{x}',
+    r'\begin{matrix}x\end{cases}',r'\begin{matrix}x',r'\end{matrix}',
+])
+def test_math_dialect_rejects_programs_unknown_commands_and_unbalanced_environments(client,latex):
+    assert client.post('/api/formulas/preview',json={'latex':latex}).status_code==422

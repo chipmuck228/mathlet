@@ -9,6 +9,12 @@ from .formulas import structured_docx, parts_from_text, render_latex
 router = APIRouter(prefix="/api", tags=["formulas"])
 
 
+@router.get('/formulas/capabilities')
+def capabilities():
+    from .formula_support import COMMANDS, ENVIRONMENTS, DIALECT_VERSION
+    return {'dialect_version':DIALECT_VERSION,'commands':sorted(COMMANDS),'environments':sorted(ENVIRONMENTS),'full_tex':False}
+
+
 class FormulaPreview(BaseModel):
     latex: str = Field(min_length=1, max_length=6000)
 

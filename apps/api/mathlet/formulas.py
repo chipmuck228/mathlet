@@ -7,7 +7,7 @@ from latex2mathml.converter import convert
 M = "http://schemas.openxmlformats.org/officeDocument/2006/math"
 W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 UNSUPPORTED = "【未转换公式，请对照原件并替换】"
-COMMANDS = set("frac dfrac tfrac sqrt left right cdot times div pm mp le ge ne leq geq neq lt gt approx equiv sim simeq cong parallel perp in notin subset supset cup cap emptyset infty pi alpha beta gamma theta lambda mu sigma omega Delta angle triangle circ degree sin cos tan log ln text mathrm mathbf mathbb odot overline underline vec hat bar begin end quad qquad space limits sum prod int displaystyle textstyle ldots cdots dots lvert rvert vert lbrace rbrace lbrack rbrack langle rangle percent".split())
+from .formula_support import COMMANDS, ENVIRONMENTS
 
 
 def render_latex(latex: str) -> str:
@@ -17,7 +17,8 @@ def render_latex(latex: str) -> str:
         raise ValueError("上下标缺少底数或内容")
     if re.search(r"\\(?![A-Za-z]|[\\ ,;:!{}|_%#])", latex):
         raise ValueError("包含不支持的转义，请检查公式")
-    unknown = set(re.findall(r"\\([A-Za-z]+)", latex)) - COMMANDS
+    tokens=list(re.finditer(r"\\([A-Za-z]+|[^A-Za-z])",latex))
+    unknown = {m[1] for m in tokens if re.fullmatch(r"[A-Za-z]+",m[1])} - COMMANDS
     if unknown:
         raise ValueError("暂不支持的公式命令：" + ", ".join(sorted(unknown)))
     depth = 0
@@ -27,9 +28,17 @@ def render_latex(latex: str) -> str:
         if depth < 0 or depth > 40: raise ValueError("公式括号不匹配或嵌套过深")
     if depth or re.search(r"\{\s*\}", latex):
         raise ValueError("公式存在不匹配或未填写的花括号")
-    environments = re.findall(r"\\(?:begin|end)\{([^}]+)\}", latex)
-    if any(e not in {"cases", "matrix", "pmatrix", "bmatrix", "aligned"} for e in environments):
-        raise ValueError("暂不支持该公式环境")
+    stack=[]
+    for token in tokens:
+        operation=token[1]
+        if operation not in {'begin','end'}: continue
+        environment=re.match(r"\{([^}]+)\}",latex[token.end():])
+        if not environment: raise ValueError("公式环境需要明确名称")
+        name=environment[1]
+        if name not in ENVIRONMENTS: raise ValueError("暂不支持该公式环境")
+        if operation=='begin': stack.append(name)
+        elif not stack or stack.pop()!=name: raise ValueError("公式环境的begin和end不匹配")
+    if stack: raise ValueError("公式环境缺少end")
     try:
         result = convert(latex)
         root = ET.fromstring(result.encode(), ET.XMLParser(resolve_entities=False, no_network=True))
@@ -37,6 +46,8 @@ def render_latex(latex: str) -> str:
         for element in root.iter():
             if ET.QName(element).namespace != "http://www.w3.org/1998/Math/MathML":
                 raise ValueError("公式渲染包含非法节点")
+            if any(re.search(r"\\[A-Za-z]+", value or '') for value in [element.text,element.tail]):
+                raise ValueError("转换结果仍含未解释命令")
             for key in list(element.attrib):
                 if key not in {"display", "mathvariant", "stretchy", "fence", "form", "separator", "accent", "accentunder", "columnalign", "rowalign", "columnspacing", "rowspacing", "linethickness", "notation", "width", "height", "depth", "lspace", "rspace", "symmetric", "movablelimits"}:
                     del element.attrib[key]

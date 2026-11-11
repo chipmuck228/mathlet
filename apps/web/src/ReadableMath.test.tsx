@@ -19,8 +19,9 @@ it("renders explicit alternate delimiters and updates unsaved core formulas",asy
  await waitFor(()=>expect(container.querySelector('math')?.textContent).toBe('y'))
 })
 it("preserves source with an explicit warning on unsupported syntax",async()=>{
- vi.mocked(api).mockRejectedValue(new Error('unsupported'))
+ vi.mocked(api).mockRejectedValue(new Error('暂不支持的公式命令：unknown'))
  render(<ReadableMath text={String.raw`\unknown{x}`} formula/>)
  await waitFor(()=>expect(screen.getByText(/公式暂无法显示/)).toBeTruthy())
  expect(screen.getByText(String.raw`\unknown{x}`)).toBeTruthy()
+ expect(screen.getByText(/暂不支持的公式命令：unknown/)).toBeTruthy()
 })

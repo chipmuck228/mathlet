@@ -64,7 +64,7 @@ export default function FormulaEditor({ initial, onApply, onClose }: { initial: 
     <div ref={host} className="mathfield-host" />
     <div className="actions">{[["平方", "x^{2}"], ["下标", "x_{1}"], ["分式", "\\frac{1}{x}"], ["根式", "\\sqrt{x}"], ["不等号", "\\leq"]].map(([name, latex]) => <Button key={name} size="sm" variant="outline" disabled={!ready} onMouseDown={e => { if (e.button === 0) e.preventDefault() }} onClick={() => insert(latex)}>插入{name}</Button>)}</div>
     <label htmlFor="formula-latex">LaTeX 输入（与可视化编辑同步）</label><textarea ref={latexInput} id="formula-latex" value={value} onFocus={() => { mode.current = "latex" }} onChange={e => setValue(e.target.value)} spellCheck={false} />
-    <p className="muted small">例如：<code>{String.raw`x^2，x_1，\frac{1}{x}，\sqrt{x+1}`}</code>。语法可显示不代表数学结论正确。</p>
+    <p className="muted small">例如：<code>{String.raw`x^2，x_1，\frac{1}{x}，\sqrt{x+1}`}</code>。支持常用数学 LaTeX，不支持自定义宏与文档排版命令。语法可显示不代表数学结论正确。</p>
     {error && <p className="feedback" role="alert">{error}</p>}
     <div className="actions"><Button disabled={busy || !value.trim()} onClick={apply}>应用公式</Button><Button variant="outline" disabled={busy} onClick={onClose}>取消</Button></div>
   </section></div>

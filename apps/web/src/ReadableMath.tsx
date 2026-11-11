@@ -9,7 +9,7 @@ function Formula({ latex, markup }: { latex: string; markup?: string }) {
     if(markup){setResult({latex,markup});return}
     let alive=true
     setResult({latex})
-    void api<{mathml:string}>("/formulas/preview",json("POST",{latex})).then(value=>{if(alive)setResult({latex,markup:value.mathml})}).catch(()=>{if(alive)setResult({latex,error:"公式暂无法显示，请编辑核查"})})
+    void api<{mathml:string}>("/formulas/preview",json("POST",{latex})).then(value=>{if(alive)setResult({latex,markup:value.mathml})}).catch(error=>{if(alive)setResult({latex,error:`公式暂无法显示，请编辑核查：${String(error).replace(/^Error: /, "")}`})})
     return()=>{alive=false}
   },[latex,markup])
   const current=result.latex===latex?result:{latex}
