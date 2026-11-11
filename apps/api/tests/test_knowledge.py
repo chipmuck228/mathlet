@@ -365,3 +365,27 @@ def test_explicit_retry_revalidates_legacy_escape_failure_without_new_paid_call(
     assert current['status']=='awaiting_selection' and len(current['calls'])==1
     assert current['calls'][0]['status']=='revalidated' and current['calls'][0]['usage']=={'total_tokens':100}
     assert current['catalog'][0]['reason']==r'理解\(\tan A\)的条件'
+
+
+def test_review_readiness_names_blockers_and_failed_batch_is_atomic(client,monkeypatch):
+    _,run=setup(client);current=complete(client,run,monkeypatch)
+    current=client.post(f"/api/knowledge/runs/{run['id']}/scope",json={'revision':current['revision'],'items':[{'id':x['id'],'revision':x['revision']} for x in current['items']],'scope':'core'}).json()
+    good,bad=current['items']
+    client.put(f"/api/knowledge/candidates/{bad['id']}",json={'revision':bad['revision'],'body':bad['body']|{'positive_example':''},'scope':'core'})
+    current=client.get(f"/api/knowledge/runs/{run['id']}").json();good,bad=current['items']
+    assert good['review_blockers']==[] and '缺少正例' in bad['review_blockers']
+    request={'revision':current['revision'],'items':[{'id':x['id'],'revision':x['revision']} for x in current['items']],'reviewer':'教师','confirmed':True}
+    failed=client.post(f"/api/knowledge/runs/{run['id']}/review",json=request)
+    assert failed.status_code==422 and bad['body']['name'] in failed.json()['detail'] and '均未批准' in failed.json()['detail']
+    fresh=client.get(f"/api/knowledge/runs/{run['id']}").json()
+    assert all(x['review_state']=='pending' for x in fresh['items'])
+    request['items']=[{'id':good['id'],'revision':good['revision']}]
+    approved=client.post(f"/api/knowledge/runs/{run['id']}/review",json=request)
+    assert approved.status_code==200,approved.text
+    fresh=approved.json();assert fresh['items'][0]['review_state']=='approved'
+    frozen=client.post(f"/api/knowledge/runs/{run['id']}/versions",json={'revision':fresh['revision']}).json()
+    assert len(frozen['snapshot']['items'])==1
+    saved=client.get(f"/api/knowledge/versions/{frozen['id']}/download").content
+    bad=fresh['items'][1]
+    client.put(f"/api/knowledge/candidates/{bad['id']}",json={'revision':bad['revision'],'body':bad['body']|{'positive_example':'2x=2'},'scope':'core'})
+    assert client.get(f"/api/knowledge/versions/{frozen['id']}/download").content==saved

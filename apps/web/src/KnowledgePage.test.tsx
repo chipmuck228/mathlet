@@ -142,3 +142,69 @@ it("explains that saving a plan alone does not confirm it",async()=>{
  expect((screen.getByRole('button',{name:'创建知识单元'}) as HTMLButtonElement).disabled).toBe(true)
  expect((screen.getByRole('button',{name:'生成知识清单'}) as HTMLButtonElement).disabled).toBe(true)
 })
+
+it("shows named readiness blockers beside approval and permits selecting only checked ready items",async()=>{
+ const good={...item,review_blockers:[]}
+ const bad={...item,id:'bad',knowledge_id:'bad-k',body:{...body,name:'反比例函数增减性'},review_blockers:['缺少正例']}
+ const run={id:'r',status:'completed',stage:'completed',stale:false,revision:4,input_json:unit,model_json:provider,catalog:[],selected_ids:['k','bad-k'],items:[good,bad],checks:[],calls:[]}
+ mock(run);render(<KnowledgePage onDirtyChange={vi.fn()}/>)
+ fireEvent.click(screen.getByText('已有知识单元与历史批次'))
+ await waitFor(()=>expect(screen.getByRole('option',{name:'方程 · 修订 1'})).toBeTruthy())
+ fireEvent.change(screen.getByLabelText('已有知识单元'),{target:{value:'u'}})
+ await waitFor(()=>expect(screen.getByLabelText('知识候选批次').querySelector('option[value="r"]')).toBeTruthy())
+ fireEvent.change(screen.getByLabelText('知识候选批次'),{target:{value:'r'}})
+ await waitFor(()=>expect(screen.getByLabelText('选择知识 反比例函数增减性')).toBeTruthy())
+ fireEvent.click(screen.getByRole('button',{name:'选择当前显示条目'}))
+ fireEvent.change(screen.getByLabelText('审核人'),{target:{value:'教师'}})
+ fireEvent.click(screen.getByLabelText(/我已检查选中条目的表述/))
+ expect((screen.getByRole('button',{name:'确认选中 2 项'}) as HTMLButtonElement).disabled).toBe(true)
+ expect(screen.getAllByText('缺少正例').length).toBeGreaterThan(0)
+ fireEvent.click(screen.getByRole('button',{name:'仅保留所选中可确认的条目'}))
+ fireEvent.click(screen.getByLabelText(/我已检查选中条目的表述/))
+ expect((screen.getByRole('button',{name:'确认选中 1 项'}) as HTMLButtonElement).disabled).toBe(false)
+ expect(vi.mocked(api).mock.calls.some(([p])=>p.endsWith('/review'))).toBe(false)
+})
+
+it("shows backend rejection next to review controls instead of claiming success",async()=>{
+ const run={id:'r',status:'completed',stage:'completed',stale:false,revision:4,input_json:unit,model_json:provider,catalog:[],selected_ids:['k'],items:[{...item,review_blockers:[]}],checks:[],calls:[]}
+ mock(run);const original=vi.mocked(api).getMockImplementation()!
+ vi.mocked(api).mockImplementation(async(path,init)=>{if(path.endsWith('/review'))throw Error('此条目有AI复核意见，请填写教师处理说明后确认');return original(path,init)})
+ render(<KnowledgePage onDirtyChange={vi.fn()}/>)
+ fireEvent.click(screen.getByText('已有知识单元与历史批次'))
+ await waitFor(()=>expect(screen.getByRole('option',{name:'方程 · 修订 1'})).toBeTruthy())
+ fireEvent.change(screen.getByLabelText('已有知识单元'),{target:{value:'u'}})
+ await waitFor(()=>expect(screen.getByLabelText('知识候选批次').querySelector('option[value="r"]')).toBeTruthy())
+ fireEvent.change(screen.getByLabelText('知识候选批次'),{target:{value:'r'}})
+ await waitFor(()=>expect(screen.getByLabelText('选择知识 一元一次方程')).toBeTruthy())
+ fireEvent.click(screen.getByLabelText('选择知识 一元一次方程'))
+ fireEvent.change(screen.getByLabelText('审核人'),{target:{value:'教师'}})
+ fireEvent.click(screen.getByLabelText(/我已检查选中条目的表述/))
+ fireEvent.click(screen.getByRole('button',{name:'确认选中 1 项'}))
+ await waitFor(()=>expect(screen.getByRole('alert').textContent).toContain('请填写教师处理说明'))
+ expect(screen.queryByText(/教师已审核/)).toBeNull()
+ expect((screen.getByRole('button',{name:'固定已审核知识版本'}) as HTMLButtonElement).disabled).toBe(true)
+})
+
+it("does not let a late older poll roll back successful approval",async()=>{
+ const run={id:'r',status:'completed',stage:'completed',stale:false,revision:4,input_json:unit,model_json:provider,catalog:[],selected_ids:['k'],items:[{...item,review_blockers:[]}],checks:[],calls:[]}
+ const approved={...run,revision:5,items:[{...item,revision:2,review_state:'approved',review_blockers:[]}]}
+ mock(run);const original=vi.mocked(api).getMockImplementation()!
+ let resolvePoll!:(value:unknown)=>void;let reads=0
+ vi.mocked(api).mockImplementation(async(path,init)=>{if(path==='/knowledge/runs/r'){reads++;if(reads===1)return run;return new Promise(resolve=>{resolvePoll=resolve})}if(path.endsWith('/review'))return approved;return original(path,init)})
+ render(<KnowledgePage onDirtyChange={vi.fn()}/>)
+ fireEvent.click(screen.getByText('已有知识单元与历史批次'))
+ await waitFor(()=>expect(screen.getByRole('option',{name:'方程 · 修订 1'})).toBeTruthy())
+ fireEvent.change(screen.getByLabelText('已有知识单元'),{target:{value:'u'}})
+ await waitFor(()=>expect(screen.getByLabelText('知识候选批次').querySelector('option[value="r"]')).toBeTruthy())
+ vi.useFakeTimers()
+ await act(async()=>{fireEvent.change(screen.getByLabelText('知识候选批次'),{target:{value:'r'}})})
+ await act(async()=>{await vi.advanceTimersByTimeAsync(3000)})
+ fireEvent.click(screen.getByLabelText('选择知识 一元一次方程'))
+ fireEvent.change(screen.getByLabelText('审核人'),{target:{value:'教师'}})
+ fireEvent.click(screen.getByLabelText(/我已检查选中条目的表述/))
+ await act(async()=>{fireEvent.click(screen.getByRole('button',{name:'确认选中 1 项'}))})
+ expect(screen.getByText(/教师已审核/)).toBeTruthy()
+ await act(async()=>{resolvePoll(run)})
+ expect(screen.getByText(/教师已审核/)).toBeTruthy()
+ expect((screen.getByRole('button',{name:'固定已审核知识版本'}) as HTMLButtonElement).disabled).toBe(false)
+})

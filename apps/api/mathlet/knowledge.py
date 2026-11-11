@@ -84,6 +84,19 @@ def body_warnings(body):
     except ValueError as exc: notes.append('公式检查：'+str(exc))
     return notes
 
+def approval_blockers(c,run,value,checks=None):
+    """One source of truth for readiness display and atomic approval validation."""
+    reasons=[]
+    if value['scope']=='pending': reasons.append('请先确定适用范围，并保存条目或批量范围')
+    if value['scope']=='excluded': return reasons
+    body=json.loads(value['body']) if isinstance(value['body'],str) else value['body']
+    reasons.extend(body_warnings(body))
+    relevant=[x for x in (checks if checks is not None else normalized_checks(c,run)) if x['knowledge_id']==value['knowledge_id']]
+    unresolved=[x for x in relevant if x.get('origin')=='uncertainty' and x['category'] in {'unclassified','correctness'}]
+    if unresolved: reasons.append('“未解决问题”仍属数学问题或待分类：修正并清空；若实际是范围／组织／教学问题，请在“AI定向完善”中分类并记录依据')
+    if any(x.get('category')!='system' for x in relevant) and not value['review_note'].strip(): reasons.append('有AI复核意见，请填写并保存“教师处理说明”')
+    return reasons
+
 class UnitInput(BaseModel):
     model_config=ConfigDict(extra='forbid')
     title: str=Field(min_length=1,max_length=160)
@@ -193,6 +206,8 @@ def run_json(c,run):
     result['checks']=normalized_checks(c,run)
     result['stale']=not current(c,run)
     result['items']=[candidate_json(r) for r in c.execute('SELECT * FROM knowledge_candidates WHERE run_id=? ORDER BY rowid',(run['id'],))]
+    for item in result['items']:
+        item['review_blockers']=approval_blockers(c,run,item,result['checks'])
     result['calls']=[dict(r)|{'usage':json.loads(r['usage']) if r['usage'] else None} for r in c.execute('SELECT id,step,status,usage,error,reserved_tokens,created_at FROM knowledge_calls WHERE run_id=? ORDER BY rowid',(run['id'],))]
     from .knowledge_actions import outputs, relations
     result['outputs']=outputs(c,run['id'])
@@ -272,14 +287,11 @@ def review(run_id:str,body:GroupReview):
         for item in body.items:
             value=row(c,'knowledge_candidates',item.id);revision(value,item.revision)
             if value['run_id']!=run_id: raise HTTPException(422,'不能跨候选批次确认')
-            if body.decision=='approve' and value['scope']=='pending': raise HTTPException(422,'请先确定每项的基础／综合／拓展／不纳入范围')
-            warnings=body_warnings(json.loads(value['body']))
-            relevant=[x for x in normalized_checks(c,run) if x['knowledge_id']==value['knowledge_id']]
-            unresolved=[x for x in relevant if x.get('origin')=='uncertainty' and x['category'] in {'unclassified','correctness'}]
-            if body.decision=='approve' and value['scope']!='excluded' and unresolved: raise HTTPException(422,'未解决问题需修正正文并清空；范围或教学问题可先分类并记录处理依据')
-            if body.decision=='approve' and value['scope']!='excluded' and warnings: raise HTTPException(422, '请先处理条目疑问：'+'；'.join(warnings))
-            if body.decision=='approve' and value['scope']!='excluded' and any(i.get('category')!='system' for i in relevant) and not value['review_note'].strip():
-                raise HTTPException(422,'此条目有AI复核意见，请填写教师处理说明后确认')
+            if body.decision=='approve':
+                blockers=approval_blockers(c,run,value)
+                if blockers:
+                    name=json.loads(value['body'])['name']
+                    raise HTTPException(422,f'“{name}”未通过审核前检查：'+'；'.join(blockers)+'。本次所选条目均未批准。')
             chosen.append(value)
         for value in chosen:
             c.execute('INSERT INTO knowledge_candidate_history VALUES(?,?,?,?,?)',(uid(),value['id'],value['revision'],packed(value),now()))
