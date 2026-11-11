@@ -52,3 +52,9 @@ it("records the teacher's issue classification separately from mathematical appr
  expect(sent).toEqual({revision:5,issue_id:'c',category:'scope',note:'属于选读范围'})
  expect(vi.mocked(api).mock.calls.some(([path])=>path.endsWith('/review'))).toBe(false)
 })
+it("separates relation generation from knowledge revision tools",()=>{
+ render(<KnowledgeActions run={run} mode="relations" disabled={false} onRefresh={vi.fn()} onDirty={vi.fn()}/>)
+ expect((screen.getByLabelText("任务类型") as HTMLSelectElement).value).toBe("relations")
+ expect(screen.getByLabelText("任务类型").querySelectorAll("option")).toHaveLength(1)
+ expect(screen.queryByLabelText("选择意见 1")).toBeNull()
+})

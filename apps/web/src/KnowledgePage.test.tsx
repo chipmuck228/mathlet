@@ -233,3 +233,23 @@ it("requires explicit resolution and saves uncertainty removal with scope and ev
  expect(sent.body.uncertainty).toBe("");expect(sent.body.statement).toBe(body.statement);expect(sent.scope).toBe("core");expect(sent.review_note).toContain("已核查")
  expect(vi.mocked(api).mock.calls.some(([p])=>p.endsWith('/review'))).toBe(false)
 })
+it("keeps a focused three-pane review and protects edits when switching items or tabs",async()=>{
+ const second={...item,id:"j",knowledge_id:"k2",body:{...body,name:"等式性质"}}
+ const run={id:"r",status:"completed",stage:"completed",stale:false,revision:4,input_json:unit,model_json:provider,catalog:[],selected_ids:["k","k2"],items:[item,second],checks:[],calls:[]}
+ mock(run);render(<KnowledgePage onDirtyChange={vi.fn()}/>);fireEvent.click(screen.getByText("已有知识单元与历史批次"))
+ await waitFor(()=>expect(screen.getByRole("option",{name:"方程 · 修订 1"})).toBeTruthy())
+ fireEvent.change(screen.getByLabelText("已有知识单元"),{target:{value:"u"}})
+ await waitFor(()=>expect(screen.getByLabelText("知识候选批次").querySelector('option[value="r"]')).toBeTruthy())
+ fireEvent.change(screen.getByLabelText("知识候选批次"),{target:{value:"r"}})
+ await screen.findByRole("navigation",{name:"知识条目列表"})
+ expect(screen.getAllByRole("complementary",{name:"疑问与处理"})).toHaveLength(1)
+ expect(screen.getAllByRole("button",{name:"编辑知识内容"})).toHaveLength(1)
+ fireEvent.click(screen.getByRole("button",{name:/等式性质.*待教师确认/}))
+ fireEvent.click(screen.getByRole("button",{name:"仅选择当前条目审核"}))
+ expect((screen.getByLabelText("选择知识 等式性质") as HTMLInputElement).checked).toBe(true)
+ expect((screen.getByLabelText("选择知识 一元一次方程") as HTMLInputElement).checked).toBe(false)
+ fireEvent.click(screen.getByRole("button",{name:"编辑知识内容"}))
+ fireEvent.change(screen.getAllByLabelText("准确表述")[0],{target:{value:"教师正在修改"}})
+ expect((screen.getByRole("tab",{name:"知识关系"}) as HTMLButtonElement).disabled).toBe(true)
+ expect((screen.getByRole("button",{name:/一元一次方程.*待教师确认/}) as HTMLButtonElement).disabled).toBe(true)
+})
