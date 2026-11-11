@@ -23,6 +23,7 @@ function mock(run?:Record<string,unknown>){vi.mocked(api).mockImplementation(asy
 })}
 it("requires saved model settings, explicit unit selection and transmission consent",async()=>{
  mock();render(<KnowledgePage onDirtyChange={vi.fn()}/>)
+ fireEvent.click(screen.getByText("已有知识单元与历史批次"))
  await waitFor(()=>expect(screen.getByRole("option",{name:"方程 · 修订 1"})).toBeTruthy())
  fireEvent.change(screen.getByLabelText("已有知识单元"),{target:{value:"u"}})
  const generate=screen.getByRole("button",{name:"生成知识清单"}) as HTMLButtonElement
@@ -37,6 +38,7 @@ it("requires saved model settings, explicit unit selection and transmission cons
 it("selects catalog items explicitly before expansion",async()=>{
  const run={id:"r",status:"awaiting_selection",stage:"details",stale:false,revision:2,input_json:unit,model_json:provider,catalog:[{id:"k",name:"一元一次方程",kind:"concept",reason:"复习定义"}],selected_ids:[],items:[],checks:[],calls:[]}
  mock(run);render(<KnowledgePage onDirtyChange={vi.fn()}/>)
+ fireEvent.click(screen.getByText("已有知识单元与历史批次"))
  await waitFor(()=>expect(screen.getByRole("option",{name:"方程 · 修订 1"})).toBeTruthy())
  fireEvent.change(screen.getByLabelText("已有知识单元"),{target:{value:"u"}})
  await waitFor(()=>expect(screen.getByLabelText("知识候选批次").querySelector('option[value="r"]')).toBeTruthy())
@@ -52,6 +54,7 @@ it("selects catalog items explicitly before expansion",async()=>{
 it("does not approve unselected or unsaved content and submits exact revisions",async()=>{
  const run={id:"r",status:"completed",stage:"completed",stale:false,revision:4,input_json:unit,model_json:provider,catalog:[],selected_ids:["k"],items:[item],checks:[],calls:[]}
  mock(run);render(<KnowledgePage onDirtyChange={vi.fn()}/>)
+ fireEvent.click(screen.getByText("已有知识单元与历史批次"))
  await waitFor(()=>expect(screen.getByRole("option",{name:"方程 · 修订 1"})).toBeTruthy())
  fireEvent.change(screen.getByLabelText("已有知识单元"),{target:{value:"u"}})
  await waitFor(()=>expect(screen.getByLabelText("知识候选批次").querySelector('option[value="r"]')).toBeTruthy())
@@ -69,6 +72,7 @@ it("does not approve unselected or unsaved content and submits exact revisions",
 })
 it("does not send a task to stale saved settings while provider edits are unsaved",async()=>{
  mock();render(<KnowledgePage onDirtyChange={vi.fn()}/>)
+ fireEvent.click(screen.getByText("已有知识单元与历史批次"))
  await waitFor(()=>expect(screen.getByRole("option",{name:"方程 · 修订 1"})).toBeTruthy())
  fireEvent.change(screen.getByLabelText("已有知识单元"),{target:{value:"u"}})
  fireEvent.click(screen.getByLabelText(/我确认向已保存的模型服务/))
@@ -81,6 +85,7 @@ it("does not send a task to stale saved settings while provider edits are unsave
 it("preserves an unsaved local item when polling receives an external revision",async()=>{
  const run={id:"r",status:"completed",stage:"completed",stale:false,revision:4,input_json:unit,model_json:provider,catalog:[],selected_ids:["k"],items:[item],checks:[],calls:[]}
  mock(run);render(<KnowledgePage onDirtyChange={vi.fn()}/>)
+ fireEvent.click(screen.getByText("已有知识单元与历史批次"))
  await waitFor(()=>expect(screen.getByRole("option",{name:"方程 · 修订 1"})).toBeTruthy())
  fireEvent.change(screen.getByLabelText("已有知识单元"),{target:{value:"u"}})
  await waitFor(()=>expect(screen.getByLabelText("知识候选批次").querySelector('option[value="r"]')).toBeTruthy())
@@ -93,4 +98,47 @@ it("preserves an unsaved local item when polling receives an external revision",
  await act(async()=>{await vi.advanceTimersByTimeAsync(3000)})
  expect((screen.getByLabelText("准确表述") as HTMLTextAreaElement).value).toBe("尚未保存的教师文字")
  expect(screen.getByText(/未保存；保存会撤销/)).toBeTruthy()
+})
+
+it("starts from a confirmed planning topic without a pilot or default example",async()=>{
+ const plan={id:'p',title:'中考规划',confirmed:true,revision:3,payload:{mode:'ai_curriculum',nodes:[{id:'domain',parent_id:null,included:true,title:'函数'},{id:'topic',parent_id:'domain',included:true,title:'二次函数'}],units:[{id:'pt',title:'二次函数',volume:'函数',goals:'画图并分析变化',node_ids:['topic']}],requirements:[{text:'能画图和读图',unit_ids:['pt'],origin:'source_excerpt'}]}}
+ const plannedUnit={...unit,title:'二次函数',chapters:['二次函数'],notes:'画图并分析变化',origin_info:{plan_id:'p',unit_id:'pt',plan_revision:3,domain:'函数',learning_requirements:[{text:'能画图和读图',origin:'source_excerpt'}]}}
+ vi.mocked(api).mockImplementation(async(path,init)=>{
+  if(path==='/knowledge/provider')return provider
+  if(path==='/plans')return [plan,{...plan,id:'unconfirmed',title:'未确认规划',confirmed:false}]
+  if(path==='/knowledge/units')return []
+  if(path==='/knowledge/units/from-plan')return plannedUnit
+  if(path==='/knowledge/units/u/versions')return []
+  if(path==='/knowledge/units/u/runs'&&init?.method==='POST')return {id:'r',status:'queued',stage:'catalog',input_json:plannedUnit,model_json:provider,catalog:[],selected_ids:[],items:[],checks:[],calls:[],revision:1}
+  if(path==='/knowledge/units/u/runs')return []
+  if(path==='/knowledge/runs/r')return {id:'r',status:'queued',stage:'catalog',input_json:plannedUnit,model_json:provider,catalog:[],selected_ids:[],items:[],checks:[],calls:[],revision:1}
+  throw Error(path)
+ })
+ render(<KnowledgePage onDirtyChange={vi.fn()}/>)
+ await waitFor(()=>expect(screen.getByRole('option',{name:'中考规划 · 规划修订 3'})).toBeTruthy())
+ expect(screen.queryByRole('button',{name:/试点|对照：/})).toBeNull()
+ expect((screen.getByLabelText('单元名称') as HTMLInputElement).value).toBe('')
+ expect(screen.queryByRole('option',{name:/未确认规划/})).toBeNull()
+ fireEvent.change(screen.getByLabelText('二级主题'),{target:{value:'pt'}})
+ expect((screen.getByLabelText('单元名称') as HTMLInputElement).value).toBe('二次函数')
+ expect((screen.getByLabelText('章节或知识范围（一行一项）') as HTMLTextAreaElement).value).toBe('二次函数')
+ expect(screen.getByText('能画图和读图')).toBeTruthy()
+ expect(vi.mocked(api).mock.calls.some(([path,init])=>path==='/knowledge/units/from-plan'&&init?.method==='POST')).toBe(false)
+ expect((screen.getByRole('button',{name:'生成知识清单'}) as HTMLButtonElement).disabled).toBe(true)
+ fireEvent.click(screen.getByRole('button',{name:'创建知识单元'}))
+ await waitFor(()=>expect(api).toHaveBeenCalledWith('/knowledge/units/from-plan',expect.objectContaining({method:'POST'})))
+ const sent=JSON.parse(vi.mocked(api).mock.calls.find(([path])=>path==='/knowledge/units/from-plan')![1]!.body as string)
+ expect(sent).toEqual({plan_id:'p',unit_id:'pt',plan_revision:3})
+ await waitFor(()=>expect(screen.getByText(/当前知识单元已建立/)).toBeTruthy())
+ fireEvent.click(screen.getByLabelText(/我确认向已保存的模型服务/))
+ expect((screen.getByRole('button',{name:'生成知识清单'}) as HTMLButtonElement).disabled).toBe(false)
+ fireEvent.click(screen.getByRole('button',{name:'生成知识清单'}))
+ await waitFor(()=>expect(api).toHaveBeenCalledWith('/knowledge/units/u/runs',expect.objectContaining({method:'POST'})))
+ expect(vi.mocked(api).mock.calls.some(([path,init])=>path==='/knowledge/units'&&init?.method==='POST')).toBe(false)
+})
+it("explains that saving a plan alone does not confirm it",async()=>{
+ mock();render(<KnowledgePage onDirtyChange={vi.fn()}/>)
+ await waitFor(()=>expect(screen.getByText(/暂无已确认的内容规划/)).toBeTruthy())
+ expect((screen.getByRole('button',{name:'创建知识单元'}) as HTMLButtonElement).disabled).toBe(true)
+ expect((screen.getByRole('button',{name:'生成知识清单'}) as HTMLButtonElement).disabled).toBe(true)
 })
