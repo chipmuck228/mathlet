@@ -1,4 +1,4 @@
-"""Stage 0/1 contracts. Execution, mathematical review and scope are independent."""
+"""Knowledge and editorial proposal contracts. Execution, mathematical review and scope are independent."""
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -56,4 +56,24 @@ def init_knowledge(c):
       run_id TEXT NOT NULL REFERENCES knowledge_runs(id), run_revision INTEGER NOT NULL,
       snapshot TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE(run_id,run_revision)
     );
+    CREATE TABLE IF NOT EXISTS knowledge_outputs (
+      id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES knowledge_runs(id),
+      type TEXT NOT NULL, body TEXT NOT NULL, original_body TEXT NOT NULL,
+      state TEXT NOT NULL DEFAULT 'pending', revision INTEGER NOT NULL DEFAULT 1,
+      reviewer TEXT NOT NULL DEFAULT '', note TEXT NOT NULL DEFAULT ''
+    );
+    CREATE TABLE IF NOT EXISTS knowledge_output_history (
+      id TEXT PRIMARY KEY, output_id TEXT NOT NULL REFERENCES knowledge_outputs(id),
+      revision INTEGER NOT NULL, snapshot TEXT NOT NULL, created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS knowledge_relations (
+      id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES knowledge_runs(id),
+      task_id TEXT NOT NULL REFERENCES knowledge_runs(id), output_id TEXT NOT NULL,
+      body TEXT NOT NULL, source_revision INTEGER NOT NULL, target_revision INTEGER NOT NULL,
+      reviewer TEXT NOT NULL, review_note TEXT NOT NULL, created_at TEXT NOT NULL,
+      retired INTEGER NOT NULL DEFAULT 0
+    );
     ''')
+
+    if 'retired' not in {x[1] for x in c.execute('PRAGMA table_info(knowledge_relations)')}:
+        c.execute('ALTER TABLE knowledge_relations ADD COLUMN retired INTEGER NOT NULL DEFAULT 0')

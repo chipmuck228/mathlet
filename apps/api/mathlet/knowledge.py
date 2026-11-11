@@ -1,5 +1,6 @@
 """Knowledge draft authoring: model proposals, human review, immutable snapshots."""
 import json
+import hashlib
 from typing import Literal
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
@@ -29,7 +30,29 @@ def origin_stale(c, unit):
 
 def current(c, run):
     unit=row(c,'knowledge_units',run['unit_id'])
-    return unit['revision']==run['input_revision'] and not origin_stale(c,unit)
+    if unit['revision']!=run['input_revision'] or origin_stale(c,unit): return False
+    meta=json.loads(run['input_json']).get('action_task')
+    if meta:
+        parent=c.execute('SELECT * FROM knowledge_runs WHERE id=?',(meta['base_run_id'],)).fetchone()
+        return bool(parent) and parent['revision']==meta['base_revision'] and parent['input_revision']==unit['revision']
+    return True
+
+
+def normalized_checks(c,run):
+    checks=json.loads(run['checks'])
+    uncertainties={}
+    for value in c.execute('SELECT knowledge_id,body FROM knowledge_candidates WHERE run_id=?',(run['id'],)):
+        message=json.loads(value['body']).get('uncertainty','').strip()
+        if message:
+            key='uncertainty:'+value['knowledge_id']+':'+hashlib.sha256(message.encode()).hexdigest()[:12]
+            uncertainties[key]={'id':key,'knowledge_id':value['knowledge_id'],'message':message,'category':'unclassified','origin':'uncertainty'}
+    result=[]
+    for i,check in enumerate(checks):
+        if check.get('origin')=='uncertainty' and check.get('id') not in uncertainties: continue
+        result.append({'category':'unclassified',**check,'id':check.get('id',f"check:{i}")})
+    for key,value in uncertainties.items():
+        if not any(x['id']==key for x in result): result.append(value)
+    return result
 
 def candidate_json(record):
     record=dict(record);record['body']=json.loads(record['body']);record['original_body']=json.loads(record['original_body'])
@@ -47,7 +70,6 @@ def body_warnings(body):
     for field,label in [('name','知识名称'),('statement','准确表述'),('conditions','成立条件'),('positive_example','正例'),('misconception','易错点／反例'),('mastery','掌握表现')]:
         if not body.get(field,'').strip(): notes.append(f'缺少{label}')
     if body.get('kind')=='method' and not body.get('method_steps','').strip(): notes.append('方法条目缺少步骤')
-    if body.get('uncertainty','').strip(): notes.append('模型或编辑标有未解决问题：'+body['uncertainty'])
     try:
         for key,value in body.items():
             if isinstance(value,str): parts_from_text(value,strict=True)
@@ -151,16 +173,21 @@ def start_run(unit_id:str,body:RunInput):
 def run_json(c,run):
     result=dict(run)
     for field in ['input_json','model_json','catalog','selected_ids','checks']: result[field]=json.loads(result[field])
+    result['checks']=normalized_checks(c,run)
     result['stale']=not current(c,run)
     result['items']=[candidate_json(r) for r in c.execute('SELECT * FROM knowledge_candidates WHERE run_id=? ORDER BY rowid',(run['id'],))]
     result['calls']=[dict(r)|{'usage':json.loads(r['usage']) if r['usage'] else None} for r in c.execute('SELECT id,step,status,usage,error,reserved_tokens,created_at FROM knowledge_calls WHERE run_id=? ORDER BY rowid',(run['id'],))]
+    from .knowledge_actions import outputs, relations
+    result['outputs']=outputs(c,run['id'])
+    result['relations']=relations(c,run['id'])
+    result['tasks']=[dict(x)|{'input_json':packed({'action_task':{'action':json.loads(x['input_json'])['action_task']['action']}})} for x in c.execute('SELECT id,status,revision,input_json FROM knowledge_runs WHERE base_run_id=? ORDER BY created_at DESC',(run['id'],)) if json.loads(x['input_json']).get('action_task')]
     return result
 
 @router.get('/units/{unit_id}/runs')
 def runs(unit_id:str):
     with connect() as c:
         row(c,'knowledge_units',unit_id)
-        return [dict(r) for r in c.execute('SELECT id,status,stage,error,revision,created_at FROM knowledge_runs WHERE unit_id=? ORDER BY created_at DESC',(unit_id,))]
+        return [{k:r[k] for k in ['id','status','stage','error','revision','created_at']} for r in c.execute('SELECT * FROM knowledge_runs WHERE unit_id=? ORDER BY created_at DESC',(unit_id,)) if not json.loads(r['input_json']).get('action_task')]
 @router.get('/runs/{run_id}')
 def run_detail(run_id:str):
     with connect() as c: return run_json(c,row(c,'knowledge_runs',run_id))
@@ -230,8 +257,11 @@ def review(run_id:str,body:GroupReview):
             if value['run_id']!=run_id: raise HTTPException(422,'不能跨候选批次确认')
             if body.decision=='approve' and value['scope']=='pending': raise HTTPException(422,'请先确定每项的基础／综合／拓展／不纳入范围')
             warnings=body_warnings(json.loads(value['body']))
+            relevant=[x for x in normalized_checks(c,run) if x['knowledge_id']==value['knowledge_id']]
+            unresolved=[x for x in relevant if x.get('origin')=='uncertainty' and x['category'] in {'unclassified','correctness'}]
+            if body.decision=='approve' and value['scope']!='excluded' and unresolved: raise HTTPException(422,'未解决问题需修正正文并清空；范围或教学问题可先分类并记录处理依据')
             if body.decision=='approve' and value['scope']!='excluded' and warnings: raise HTTPException(422, '请先处理条目疑问：'+'；'.join(warnings))
-            if body.decision=='approve' and value['scope']!='excluded' and any(i.get('knowledge_id')==value['knowledge_id'] for i in json.loads(run['checks'])) and not value['review_note'].strip():
+            if body.decision=='approve' and value['scope']!='excluded' and any(i.get('category')!='system' for i in relevant) and not value['review_note'].strip():
                 raise HTTPException(422,'此条目有AI复核意见，请填写教师处理说明后确认')
             chosen.append(value)
         for value in chosen:
@@ -260,7 +290,10 @@ def freeze(run_id:str,body:RevisionInput):
         if not included: raise HTTPException(422,'至少需要一个已审核且纳入的知识条目')
         snapshot={'schema_version':1,'unit':unit_json(c,row(c,'knowledge_units',run['unit_id'])), 'model':json.loads(run['model_json']), 'input':json.loads(run['input_json']), 'run_id':run_id,'run_revision':run['revision'],
             'items':items,'reviewed_count':len(items),'selected_count':len(json.loads(run['selected_ids'])),
-            'official_coverage_verified':False,'basis':'model_prior_and_teacher_review','checks':json.loads(run['checks'])}
+            'official_coverage_verified':False,'basis':'model_prior_and_teacher_review','checks':normalized_checks(c,run)}
+        from .knowledge_actions import relations
+        included_ids={x['knowledge_id'] for x in included}
+        snapshot['relations']=[edge for edge in relations(c,run_id) if edge['usable'] and edge['body']['source_id'] in included_ids and edge['body']['target_id'] in included_ids]
         key=uid();c.execute('INSERT INTO knowledge_versions VALUES(?,?,?,?,?,?)',(key,run['unit_id'],run_id,run['revision'],packed(snapshot),now()))
         return {'id':key,'snapshot':snapshot}
 

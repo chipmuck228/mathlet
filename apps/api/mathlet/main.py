@@ -394,6 +394,9 @@ app.include_router(original_view_router)
 from .knowledge import router as knowledge_router
 app.include_router(knowledge_router)
 
+from .knowledge_actions import router as knowledge_actions_router
+app.include_router(knowledge_actions_router)
+
 web = ROOT / "apps" / "web" / "dist"
 if web.is_dir():
     app.mount("/", StaticFiles(directory=web, html=True), name="web")

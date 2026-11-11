@@ -117,7 +117,7 @@ def test_additive_schema_keeps_existing_records(client):
     init_db(); init_db()
     assert client.get("/api/plans").json()[0]["id"] == plan["id"]
     with connect() as c:
-        assert c.execute("SELECT count(*) FROM schema_migrations").fetchone()[0] == 4
+        assert c.execute("SELECT count(*) FROM schema_migrations").fetchone()[0] == 5
         assert c.execute("SELECT count(*) FROM documents").fetchone()[0] == 1
 
 

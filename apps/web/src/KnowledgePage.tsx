@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button"
 import { api, json } from "@/lib/api"
 import MathBlockEditor from "./MathBlockEditor"
 import ReadableMath from "./ReadableMath"
+import KnowledgeActions from "./KnowledgeActions"
 const FormulaEditor = lazy(() => import("./FormulaEditor"))
 import type { Block } from "@/lib/api"
 
@@ -10,7 +11,7 @@ type Body = { name: string; kind: string; statement: string; conditions: string;
 type Item = { id: string; knowledge_id: string; body: Body; original_body: Partial<Body>; scope: string; review_state: string; revision: number; reviewer: string; review_note: string; warnings: string[]; formula_mathml: string; origin: string; field_content?: Record<string, Block["content"]> }
 type Unit = { id: string; title: string; chapters: string[]; target: string; notes: string; revision: number; stale: boolean }
 type Provider = { base_url: string; model: string; api_key_configured: boolean; ready: boolean; json_mode: boolean; token_parameter: string; thinking_mode?: string; credential_error?: string; timeout: number; max_calls: number; output_token_budget: number }
-type Run = { id: string; status: string; stage: string; error: string; stale: boolean; revision: number; input_json: { title: string; chapters: string[]; target: string; notes: string }; model_json: Provider; catalog: { id: string; name: string; kind: string; reason: string }[]; selected_ids: string[]; items: Item[]; checks: { knowledge_id: string; message: string }[]; calls: { id: string; step: string; status: string; reserved_tokens: number; usage: Record<string, unknown> | null; error: string }[] }
+type Run = { id: string; status: string; stage: string; error: string; stale: boolean; revision: number; input_json: { title: string; chapters: string[]; target: string; notes: string }; model_json: Provider; catalog: { id: string; name: string; kind: string; reason: string }[]; selected_ids: string[]; items: Item[]; checks: { id?:string; category?:string; classification_note?:string; knowledge_id: string; message: string }[]; tasks?: {id:string;status:string;input_json:string}[]; relations?: Parameters<typeof KnowledgeActions>[0]["run"]["relations"]; calls: { id: string; step: string; status: string; reserved_tokens: number; usage: Record<string, unknown> | null; error: string }[] }
 type Version = { id: string; run_id: string; run_revision: number; created_at: string }
 type Plan = { id: string; title: string; revision: number; confirmed: boolean; payload: { units: { id: string; title: string }[] } }
 const scopes: Record<string,string> = { pending: "待确定范围", core: "基础必备", connection: "连接与综合", extension: "拓展选读", excluded: "不纳入" }
@@ -19,7 +20,7 @@ const states: Record<string,string> = { queued:"排队中", running:"模型运�
 const emptyBody: Body = { name:"补充知识",kind:"concept",statement:"",conditions:"",formula:"",positive_example:"",misconception:"",mastery:"",method_steps:"",uncertainty:"" }
 const fieldLabels: [keyof Body,string][] = [["statement","准确表述"],["conditions","成立条件"],["positive_example","正例"],["misconception","易错点／反例与解释"],["mastery","可观察的掌握表现"],["method_steps","通用方法步骤"],["uncertainty","未解决问题（处理后清空或说明）"]]
 
-function ItemEditor({ item, issues, disabled, onSaved, onDirty }: { item: Item; issues: string[]; disabled: boolean; onSaved: (id: string) => Promise<void>; onDirty: (id: string, dirty: boolean) => void }) {
+function ItemEditor({ item, issues, disabled, onSaved, onDirty, onAIAction }: { item: Item; issues: string[]; disabled: boolean; onSaved: (id: string) => Promise<void>; onDirty: (id: string, dirty: boolean) => void; onAIAction: (action:string)=>void }) {
   const [body,setBody]=useState(item.body), [scope,setScope]=useState(item.scope), [note,setNote]=useState(item.review_note)
   const [busy,setBusy]=useState(false), [error,setError]=useState("")
   const [editing,setEditing]=useState(false),[formulaOpen,setFormulaOpen]=useState(false)
@@ -38,6 +39,7 @@ function ItemEditor({ item, issues, disabled, onSaved, onDirty }: { item: Item; 
     {formulaOpen&&<Suspense fallback={<p>正在加载公式编辑器…</p>}><FormulaEditor initial={body.formula} onClose={()=>setFormulaOpen(false)} onApply={latex=>{setBody({...body,formula:latex});setFormulaOpen(false)}}/></Suspense>}
     <div className="two-column"><div><label htmlFor={`${item.id}-scope`}>适用范围</label><select id={`${item.id}-scope`} value={scope} disabled={disabled||busy} onChange={e=>setScope(e.target.value)}>{Object.entries(scopes).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select></div><div><label htmlFor={`${item.id}-note`}>教师处理说明</label><textarea id={`${item.id}-note`} value={note} disabled={disabled||busy} onChange={e=>setNote(e.target.value)} placeholder="处理AI疑问的依据、纠错理由或不纳入原因"/></div></div>
     {(item.warnings.length>0||issues.length>0)&&<div className="notice"><strong>需要核查</strong>{item.warnings.map((x,i)=><p key={`w${i}`}><ReadableMath text={x}/></p>)}{issues.map((x,i)=><p key={`i${i}`}>AI复核意见（可能有误）：<ReadableMath text={x}/></p>)}</div>}
+    <div className="actions">{[["supplement","让 AI 补充"],["revise","让 AI 修订"],["split","让 AI 拆分"]].map(([action,label])=><Button key={action} variant="outline" disabled={disabled||busy||dirty} onClick={()=>onAIAction(action)}>{label}</Button>)}</div>
     <p className="small muted">依据：{item.origin==="teacher_authored"?"教师补充":"模型已有知识起草，未检索教材或课标"}。范围选择不代表官方课标核验。</p>
     <details><summary>比较初始草案</summary>{fieldLabels.map(([key,label])=><div key={key}><label>{label}</label><div className="block-reading"><ReadableMath text={item.original_body[key]||""}/></div></div>)}<label>核心公式</label><ReadableMath text={item.original_body.formula||""} formula/><details><summary>原始数据</summary><pre className="knowledge-json">{JSON.stringify(item.original_body,null,2)}</pre></details></details>
     <details onToggle={e=>{const element=e.currentTarget;if(element.open&&!element.dataset.loaded){element.dataset.loaded="yes";void api<unknown[]>(`/knowledge/candidates/${item.id}/history`).then(history=>{element.querySelector("pre")!.textContent=JSON.stringify(history,null,2)}).catch(()=>{})}}}><summary>已保存的历史修订</summary><pre className="knowledge-json">正在读取…</pre></details>
@@ -46,6 +48,7 @@ function ItemEditor({ item, issues, disabled, onSaved, onDirty }: { item: Item; 
 }
 
 export default function KnowledgePage({ onDirtyChange }: { onDirtyChange: (dirty: boolean) => void }) {
+  const [actionRequest,setActionRequest]=useState<{action:string;candidate_id:string;serial:number}|null>(null)
   const [provider,setProvider]=useState<Provider|null>(null),[savedProvider,setSavedProvider]=useState<Provider|null>(null),[key,setKey]=useState(""),[clearKey,setClearKey]=useState(false)
   const [units,setUnits]=useState<Unit[]>([]),[unitId,setUnitId]=useState("")
   const [title,setTitle]=useState("一元二次方程—二次函数"),[chapters,setChapters]=useState("一元二次方程\n二次函数")
@@ -79,7 +82,7 @@ export default function KnowledgePage({ onDirtyChange }: { onDirtyChange: (dirty
   const selectedItems=chosen.map(i=>({id:i.id,revision:i.revision}))
   const visible=run?.items.filter(i=>filter==="all"||(filter==="issues"&&(i.warnings.length>0||run.checks.some(c=>c.knowledge_id===i.knowledge_id)))||(filter==="pending"&&i.review_state!=="approved"))||[]
   return <div className="knowledge-page"><fieldset disabled={busy} className="knowledge-fieldset">
-    <p className="notice">阶段 0／1 · 先由 AI 起草知识，再由教师校正和确定范围。不要求先上传教材正文；当前不生成知识关系、题目解法或整本册子，也不宣称全册课标覆盖。</p>
+    <p className="notice">阶段 0／1 · 先由 AI 起草知识，再由教师校正和确定范围。不要求先上传教材正文；支持定向完善、完整性建议及知识关系候选；当前不生成题目解法或整本册子，也不宣称全册课标覆盖。</p>
     <details className="surface"><summary>模型服务配置 · 密钥只保存在本机</summary>{provider&&<>
       <label htmlFor="model-base">OpenAI 兼容服务地址（含 /v1）</label><input id="model-base" value={provider.base_url} onChange={e=>{setProvider({...provider,base_url:e.target.value});setConsent(false)}}/>
       <label htmlFor="model-name">模型名称</label><input id="model-name" value={provider.model} onChange={e=>{setProvider({...provider,model:e.target.value});setConsent(false)}} placeholder="填写服务商提供的实际模型ID"/>
@@ -119,13 +122,14 @@ export default function KnowledgePage({ onDirtyChange }: { onDirtyChange: (dirty
     {run&&run.items.length>0&&<section className="surface"><h2>校正知识与确定范围</h2><p className="small muted">生成与模型复核不代表数学已正确。只确认您检查过的条目；“不纳入”不等于错误。官方课标覆盖尚未核验。</p>
       <div className="actions"><select aria-label="候选查看范围" disabled={dirtyItems.length>0} value={filter} onChange={e=>setFilter(e.target.value)}><option value="all">全部条目</option><option value="issues">有疑问条目</option><option value="pending">待审核条目</option></select><Button variant="ghost" onClick={()=>setSelection(visible.map(i=>i.id))}>选择当前显示条目</Button><Button variant="ghost" onClick={()=>setSelection([])}>清除条目选择</Button><span>已选 {chosen.length} 项：{chosen.map(i=>i.body.name).join("、")||"无"}</span></div>
       <div className="actions"><select aria-label="批量适用范围" value={groupScope} onChange={e=>setGroupScope(e.target.value)}>{Object.entries(scopes).filter(([k])=>k!=="pending").map(([k,v])=><option key={k} value={k}>{v}</option>)}</select><Button variant="outline" disabled={busy||!editable||dirty||!chosen.length} onClick={()=>act(async()=>{setRun(await api<Run>(`/knowledge/runs/${run.id}/scope`,json("POST",{revision:run.revision,items:selectedItems,scope:groupScope})));setConfirmed(false)})}>保存选中条目的范围（不代表审核通过）</Button></div>
-      {visible.map(item=><div key={item.id}><label className="checkline"><input aria-label={`选择知识 ${item.body.name}`} type="checkbox" checked={selection.includes(item.id)} disabled={busy||!editable} onChange={e=>{setSelection(old=>e.target.checked?[...old,item.id]:old.filter(x=>x!==item.id));setConfirmed(false)}}/><ReadableMath text={item.body.name}/></label><ItemEditor key={`${item.id}-${item.revision}`} item={item} issues={run.checks.filter(c=>c.knowledge_id===item.knowledge_id).map(c=>c.message)} disabled={busy||!editable} onSaved={reload} onDirty={markDirty}/></div>)}
+      {visible.map(item=><div key={item.id}><label className="checkline"><input aria-label={`选择知识 ${item.body.name}`} type="checkbox" checked={selection.includes(item.id)} disabled={busy||!editable} onChange={e=>{setSelection(old=>e.target.checked?[...old,item.id]:old.filter(x=>x!==item.id));setConfirmed(false)}}/><ReadableMath text={item.body.name}/></label><ItemEditor key={`${item.id}-${item.revision}`} item={item} issues={run.checks.filter(c=>c.knowledge_id===item.knowledge_id).map(c=>c.message)} disabled={busy||!editable} onSaved={reload} onDirty={markDirty} onAIAction={action=>setActionRequest({action,candidate_id:item.id,serial:Date.now()})}/></div>)}
       <div className="actions"><Button variant="outline" disabled={busy||!editable||dirty} onClick={()=>act(async()=>{await api(`/knowledge/runs/${run.id}/items`,json("POST",{revision:run.revision,body:emptyBody,scope:"pending"}));await reload();setFilter("all")})}>补充一个知识条目</Button></div>
       <label htmlFor="knowledge-reviewer">审核人</label><input id="knowledge-reviewer" value={reviewer} onChange={e=>{setReviewer(e.target.value);setConfirmed(false)}}/>
       <label htmlFor="knowledge-return-note">批量退回原因（退回时必填）</label><textarea id="knowledge-return-note" value={returnNote} onChange={e=>setReturnNote(e.target.value)}/>
       <label className="checkline"><input type="checkbox" checked={confirmed} onChange={e=>setConfirmed(e.target.checked)}/>我已检查选中条目的表述、条件、公式、例子及适用范围，并处理其疑问</label>
       <div className="actions"><Button disabled={busy||!editable||dirty||!chosen.length||!confirmed||!reviewer.trim()} onClick={()=>act(async()=>{setRun(await api<Run>(`/knowledge/runs/${run.id}/review`,json("POST",{revision:run.revision,items:selectedItems,reviewer,confirmed})));setConfirmed(false);setMessage("选中条目已记录教师确认。未选中项保持原状态。")})}>确认选中 {chosen.length} 项</Button><Button variant="outline" disabled={busy||!editable||dirty||!chosen.length||!reviewer.trim()||!returnNote.trim()} onClick={()=>act(async()=>{setRun(await api<Run>(`/knowledge/runs/${run.id}/review`,json("POST",{revision:run.revision,items:selectedItems,reviewer,confirmed:true,decision:"return",note:returnNote})));setConfirmed(false);setReturnNote("");setMessage("选中条目已退回，原文保留，尚未审核通过。")})}>退回选中项</Button><Button variant="outline" disabled={busy||!editable||dirty||!run.items.some(i=>i.review_state==="approved"&&i.scope!=="excluded")} onClick={()=>act(async()=>{await api(`/knowledge/runs/${run.id}/versions`,json("POST",{revision:run.revision}));await reload();setMessage("已固定知识版本；只包含已确认条目及范围决定，不代表全单元／全册覆盖。")})}>固定已审核知识版本</Button></div>
     </section>}
+    {run&&run.items.length>0&&<KnowledgeActions key={run.id} run={run} request={actionRequest} disabled={busy||unitDirty||dirtyItems.some(id=>!id.startsWith("output:"))||!editable||providerDirty} onRefresh={reload} onDirty={markDirty}/>}
     {versions.length>0&&<section className="surface"><h2>已固定的知识版本</h2><p className="small muted">后续编辑和重新生成不会改变这些文件。用于后续题目分析的接入属于下一阶段。</p>{versions.map(v=><div className="document-row" key={v.id}><span>{new Date(v.created_at).toLocaleString()} · 候选修订 {v.run_revision}</span><a href={`/api/knowledge/versions/${v.id}/download`}>下载审核版 JSON</a></div>)}</section>}
     {message&&<p role="status" className="feedback knowledge-message">{message}</p>}
   </fieldset></div>

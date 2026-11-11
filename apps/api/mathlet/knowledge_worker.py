@@ -1,6 +1,7 @@
 """Checkpointed, budgeted knowledge drafting. No tools or source-file access for models."""
 import json
 import re
+from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 from .db import connect, now, uid
 from .knowledge import packed, row, current
@@ -41,6 +42,7 @@ class Issue(BaseModel):
     model_config=ConfigDict(extra='forbid')
     knowledge_id:str
     message:str=Field(min_length=1,max_length=1800)
+    category:Literal['unclassified','correctness','scope','organization','teaching','system']='unclassified'
 class Critic(BaseModel):
     model_config=ConfigDict(extra='forbid')
     issues:list[Issue]=Field(max_length=60)
@@ -120,6 +122,10 @@ def run_one_knowledge():
             raise ValueError('模型服务配置与任务快照不同；恢复原配置后重试，或创建新候选批次')
         config=config.model_copy(update={k:frozen[k] for k in ['timeout','max_calls','output_token_budget']})
         snapshot=json.loads(run['input_json']);catalog=json.loads(run['catalog'])
+        if snapshot.get('action_task'):
+            from .knowledge_action_worker import run_action
+            run_action(run,config,snapshot)
+            return True
         if run['stage']=='catalog':
             def validate_catalog(value):
                 parsed=Catalog.model_validate(value)
@@ -127,7 +133,7 @@ def run_one_knowledge():
                 names=[x.name.strip().casefold() for x in parsed.items]
                 if len(set(names))!=len(names) or any(not n for n in names): raise ValueError('清单含重复或空白知识名称')
                 return parsed
-            result=call(run,config,'catalog','生成知识清单，先不要展开讲解。返回 {"items":[{"name":"...","kind":"concept","reason":"为什么需要复习"}]}。严格不超过max_items，允许提示范围不确定的知识。',snapshot,1800,validate_catalog)
+            result=call(run,config,'catalog','生成知识清单，先不要展开讲解。返回 {"items":[{"name":"...","kind":"concept","reason":"为什么需要复习"}]}。严格不超过max_items，这是本批数量而非完整性标准；不要为凑数将概念、性质和方法合并成大条目。允许提示范围不确定的知识。',snapshot,1800,validate_catalog)
             catalog=[{'id':uid(),**item.model_dump()} for item in result.items]
             with connect() as c:
                 c.execute("UPDATE knowledge_runs SET catalog=?,status='awaiting_selection',stage='details',revision=revision+1,updated_at=? WHERE id=?",(packed(catalog),now(),run['id']))
@@ -166,7 +172,7 @@ def run_one_knowledge():
             result=Critic.model_validate(value)
             if any(i.knowledge_id not in selected for i in result.issues): raise ValueError('复核引用了不存在的知识ID')
             return result
-        critic=call(run,config,'critic','作为单独一轮数学检查，查找条件缺失、定义错误、反例、重复或超范围疑问。只提出需要教师判断的问题，不替教师批准，也不伪造检索来源。返回 {"issues":[{"knowledge_id":"...","message":"具体问题"}]}，没有发现问题返回空数组。',
+        critic=call(run,config,'critic','作为单独一轮数学检查，查找条件缺失、定义错误、反例、重复或超范围疑问。区分数学正确性、范围选择、内容组织、教学建议和系统信息；不要对随机知识ID或未核验课标标志提出数学质疑。只提出需要教师判断的问题，不替教师批准，也不伪造检索来源。返回 {"issues":[{"knowledge_id":"...","category":"correctness/scope/organization/teaching/system/unclassified","message":"具体问题"}]}，没有发现问题返回空数组。',
             {'unit':snapshot,'candidates':candidates},2200,validate_critic)
         identity_checks=[]
         catalog_by_id={x['id']:x for x in catalog}
@@ -175,7 +181,7 @@ def run_one_knowledge():
                 original=json.loads(candidate['original_body']); identity=catalog_by_id[candidate['knowledge_id']]
                 changes=[f"{field}：清单为 {identity[field]}，模型建议为 {original.get(field)}" for field in ['name','kind'] if original.get(field)!=identity[field]]
                 if changes:
-                    identity_checks.append({'knowledge_id':candidate['knowledge_id'],'message':'展开时模型改写了名称或类型；当前保留清单身份，请核对正文是否仍对应原知识，并在处理说明中记录决定。'+'；'.join(changes)})
+                    identity_checks.append({'category':'organization','knowledge_id':candidate['knowledge_id'],'message':'展开时模型改写了名称或类型；当前保留清单身份，请核对正文是否仍对应原知识，并在处理说明中记录决定。'+'；'.join(changes)})
             c.execute("UPDATE knowledge_runs SET checks=?,status='completed',stage='completed',revision=revision+1,updated_at=? WHERE id=?",(packed(identity_checks+[x.model_dump() for x in critic.issues]),now(),run['id']))
     except Exception as exc:
         try: secret=load_provider().api_key
