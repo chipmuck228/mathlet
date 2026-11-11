@@ -332,3 +332,36 @@ def test_legacy_identity_failure_reuses_saved_response_on_retry(client,monkeypat
     assert current['status']=='completed',current
     assert len(calls)==1 and len(current['calls'])==3
     assert any(x['status']=='revalidated' for x in current['calls'])
+
+
+def test_catalog_with_malformed_latex_json_is_normalized_and_audited(client,monkeypatch):
+    _,run=setup(client)
+    raw=r'{"items":[{"name":"反比例函数","kind":"concept","reason":"理解\(y=\frac{k}{x}\)，且\(k\ne 0\)"}]}'
+    monkeypatch.setattr(worker,'generate',lambda *_:(raw,{'total_tokens':51}))
+    worker.run_one_knowledge()
+    current=client.get(f"/api/knowledge/runs/{run['id']}").json()
+    assert current['status']=='awaiting_selection',current
+    assert current['catalog'][0]['reason']==r'理解\(y=\frac{k}{x}\)，且\(k\ne 0\)'
+    assert current['calls'][0]['status']=='succeeded' and '规范化' in current['calls'][0]['error']
+    artifacts=client.get(f"/api/knowledge/runs/{run['id']}/artifacts").json()
+    assert artifacts['calls'][0]['raw_response']==raw
+    assert 'math-json-v1' in artifacts['calls'][0]['request_json']
+    assert r'\\frac' in json.loads(artifacts['calls'][0]['request_json'])['system']
+
+
+def test_explicit_retry_revalidates_legacy_escape_failure_without_new_paid_call(client,monkeypatch):
+    _,run=setup(client)
+    from mathlet.db import uid,now
+    raw=r'{"items":[{"name":"锐角三角函数","kind":"concept","reason":"理解\(\tan A\)的条件"}]}'
+    with connect() as c:
+        c.execute('INSERT INTO knowledge_calls(id,run_id,step,status,request_json,raw_response,error,reserved_tokens,usage,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)',
+            (uid(),run['id'],'catalog','failed','{}',raw,'Invalid \\escape: line 1 column 182 (char 181)',1800,'{"total_tokens":100}',now(),now()))
+        c.execute("UPDATE knowledge_runs SET status='failed' WHERE id=?",(run['id'],))
+    current=client.get(f"/api/knowledge/runs/{run['id']}").json()
+    assert client.post(f"/api/knowledge/runs/{run['id']}/retry",json={'revision':current['revision']}).status_code==200
+    monkeypatch.setattr(worker,'generate',lambda *_:pytest.fail('no new model call needed'))
+    worker.run_one_knowledge()
+    current=client.get(f"/api/knowledge/runs/{run['id']}").json()
+    assert current['status']=='awaiting_selection' and len(current['calls'])==1
+    assert current['calls'][0]['status']=='revalidated' and current['calls'][0]['usage']=={'total_tokens':100}
+    assert current['catalog'][0]['reason']==r'理解\(\tan A\)的条件'
