@@ -95,3 +95,15 @@ def test_upgrade_keeps_legacy_text_without_guessing_and_snapshot_format_compatib
     assert '<msup>' not in render_book(snapshot)
     snapshot['format_version']=2
     assert '<msup>' in render_book(snapshot)
+
+
+def test_deepseek_circle_and_number_set_commands_render_without_rewriting(client):
+    from lxml import etree as ET
+    for latex,expected in [(r'\odot O','⊙'),(r'x\in\mathbb{R}','ℝ')]:
+        response=client.post('/api/formulas/preview',json={'latex':latex})
+        assert response.status_code==200,response.text
+        root=ET.fromstring(response.json()['mathml'].encode())
+        assert expected in ''.join(root.itertext())
+        assert parts_from_text(r'\('+latex+r'\)',strict=True)[0]['latex']==latex
+    for latex in [r'\href{javascript:alert(1)}{x}',r'\htmlClass{bad}{x}',r'\newcommand{\x}{x}',r'\unknown{x}']:
+        assert client.post('/api/formulas/preview',json={'latex':latex}).status_code==422

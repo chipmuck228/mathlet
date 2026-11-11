@@ -7,7 +7,7 @@ from latex2mathml.converter import convert
 M = "http://schemas.openxmlformats.org/officeDocument/2006/math"
 W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 UNSUPPORTED = "【未转换公式，请对照原件并替换】"
-COMMANDS = set("frac dfrac tfrac sqrt left right cdot times div pm mp le ge ne leq geq neq lt gt approx equiv sim simeq cong parallel perp in notin subset supset cup cap emptyset infty pi alpha beta gamma theta lambda mu sigma omega Delta angle triangle circ degree sin cos tan log ln text mathrm mathbf overline underline vec hat bar begin end quad qquad space limits sum prod int displaystyle textstyle ldots cdots dots lvert rvert vert lbrace rbrace lbrack rbrack langle rangle percent".split())
+COMMANDS = set("frac dfrac tfrac sqrt left right cdot times div pm mp le ge ne leq geq neq lt gt approx equiv sim simeq cong parallel perp in notin subset supset cup cap emptyset infty pi alpha beta gamma theta lambda mu sigma omega Delta angle triangle circ degree sin cos tan log ln text mathrm mathbf mathbb odot overline underline vec hat bar begin end quad qquad space limits sum prod int displaystyle textstyle ldots cdots dots lvert rvert vert lbrace rbrace lbrack rbrack langle rangle percent".split())
 
 
 def render_latex(latex: str) -> str:
