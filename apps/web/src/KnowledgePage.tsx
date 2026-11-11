@@ -47,7 +47,7 @@ function ItemEditor({ item, issues, disabled, onSaved, onDirty, onAIAction }: { 
   </article>
 }
 
-export default function KnowledgePage({ onDirtyChange, initialUnitId }: { initialUnitId?:string; onDirtyChange: (dirty: boolean) => void }) {
+export default function KnowledgePage({ onDirtyChange, initialUnitId, onOpenResearch }: { onOpenResearch?:()=>void; initialUnitId?:string; onDirtyChange: (dirty: boolean) => void }) {
   const handledInitialUnit=useRef("")
   const [actionRequest,setActionRequest]=useState<{action:string;candidate_id:string;serial:number}|null>(null)
   const [provider,setProvider]=useState<Provider|null>(null),[savedProvider,setSavedProvider]=useState<Provider|null>(null),[key,setKey]=useState(""),[clearKey,setClearKey]=useState(false)
@@ -145,7 +145,7 @@ export default function KnowledgePage({ onDirtyChange, initialUnitId }: { initia
       <div className="actions"><Button disabled={busy||!editable||dirty||!chosen.length||!confirmed||!reviewer.trim()} onClick={()=>act(async()=>{setRun(await api<Run>(`/knowledge/runs/${run.id}/review`,json("POST",{revision:run.revision,items:selectedItems,reviewer,confirmed})));setConfirmed(false);setMessage("选中条目已记录教师确认。未选中项保持原状态。")})}>确认选中 {chosen.length} 项</Button><Button variant="outline" disabled={busy||!editable||dirty||!chosen.length||!reviewer.trim()||!returnNote.trim()} onClick={()=>act(async()=>{setRun(await api<Run>(`/knowledge/runs/${run.id}/review`,json("POST",{revision:run.revision,items:selectedItems,reviewer,confirmed:true,decision:"return",note:returnNote})));setConfirmed(false);setReturnNote("");setMessage("选中条目已退回，原文保留，尚未审核通过。")})}>退回选中项</Button><Button variant="outline" disabled={busy||!editable||dirty||!run.items.some(i=>i.review_state==="approved"&&i.scope!=="excluded")} onClick={()=>act(async()=>{await api(`/knowledge/runs/${run.id}/versions`,json("POST",{revision:run.revision}));await reload();setMessage("已固定知识版本；只包含已确认条目及范围决定，不代表全单元／全册覆盖。")})}>固定已审核知识版本</Button></div>
     </section>}
     {run&&run.items.length>0&&<KnowledgeActions key={run.id} run={run} request={actionRequest} disabled={busy||unitDirty||dirtyItems.some(id=>!id.startsWith("output:"))||!editable||providerDirty} onRefresh={reload} onDirty={markDirty}/>}
-    {versions.length>0&&<section className="surface"><h2>已固定的知识版本</h2><p className="small muted">后续编辑和重新生成不会改变这些文件。用于后续题目分析的接入属于下一阶段。</p>{versions.map(v=><div className="document-row" key={v.id}><span>{new Date(v.created_at).toLocaleString()} · 候选修订 {v.run_revision}</span><a href={`/api/knowledge/versions/${v.id}/download`}>下载审核版 JSON</a></div>)}</section>}
+    {versions.length>0&&<section className="surface"><h2>已固定的知识版本</h2>{onOpenResearch&&<Button variant="outline" disabled={dirty||busy} onClick={onOpenResearch}>继续题目与研究</Button>}<p className="small muted">后续编辑和重新生成不会改变这些文件。用于后续题目分析的接入属于下一阶段。</p>{versions.map(v=><div className="document-row" key={v.id}><span>{new Date(v.created_at).toLocaleString()} · 候选修订 {v.run_revision}</span><a href={`/api/knowledge/versions/${v.id}/download`}>下载审核版 JSON</a></div>)}</section>}
     {message&&<p role="status" className="feedback knowledge-message">{message}</p>}
   </fieldset></div>
 }

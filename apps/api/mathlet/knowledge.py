@@ -32,6 +32,9 @@ def current(c, run):
     unit=row(c,'knowledge_units',run['unit_id'])
     if unit['revision']!=run['input_revision'] or origin_stale(c,unit): return False
     snapshot=json.loads(run['input_json'])
+    if snapshot.get('research_task'):
+        from .research import sources_current
+        return sources_current(c,snapshot['research_task'])
     if snapshot.get('planning_task'):
         from .planning_ai import sources_current
         return sources_current(c,snapshot)
@@ -104,7 +107,7 @@ def configure_provider(body: Provider): return save_provider(body)
 
 @router.get('/units')
 def units():
-    with connect() as c: return [unit_json(c,r) for r in c.execute('SELECT * FROM knowledge_units ORDER BY created_at DESC') if not json.loads(r['origin']).get('internal_planning')]
+    with connect() as c: return [unit_json(c,r) for r in c.execute('SELECT * FROM knowledge_units ORDER BY created_at DESC') if not any(json.loads(r['origin']).get(k) for k in ['internal_planning','internal_research'])]
 
 @router.post('/units',status_code=201)
 def create_unit(body: UnitInput):

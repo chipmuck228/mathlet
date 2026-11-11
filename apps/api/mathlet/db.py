@@ -100,6 +100,9 @@ def init_db():
             c.execute("ALTER TABLE blocks ADD COLUMN original_text TEXT")
         from .knowledge_models import init_knowledge
         init_knowledge(c)
+        from .research_models import init_research
+        init_research(c)
+        c.execute("INSERT OR IGNORE INTO schema_migrations VALUES(6,?)", (now(),))
         c.execute("INSERT OR IGNORE INTO schema_migrations VALUES(5,?)", (now(),))
         c.execute("INSERT OR IGNORE INTO schema_migrations VALUES(4,?)", (now(),))
         c.execute("INSERT OR IGNORE INTO schema_migrations VALUES(3,?)", (now(),))

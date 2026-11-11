@@ -400,6 +400,9 @@ app.include_router(knowledge_actions_router)
 from .planning_ai import router as planning_ai_router
 app.include_router(planning_ai_router)
 
+from .research import router as research_router
+app.include_router(research_router)
+
 web = ROOT / "apps" / "web" / "dist"
 if web.is_dir():
     app.mount("/", StaticFiles(directory=web, html=True), name="web")

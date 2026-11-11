@@ -19,3 +19,6 @@ body{--keyboard-zindex:2100}
 
 .readable-math { white-space: pre-wrap; overflow-wrap: anywhere; }
 .knowledge-formula { overflow-x: auto; padding: 0.75rem 0; font-size: 1.15rem; }
+
+.research-figure { max-width: 100%; max-height: 360px; object-fit: contain; margin: 1rem 0; }
+.research-array-item { margin: .8rem 0; padding-left: 1rem; border-left: 1px solid #dedbd3; }
