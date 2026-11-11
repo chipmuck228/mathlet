@@ -208,3 +208,28 @@ it("does not let a late older poll roll back successful approval",async()=>{
  expect(screen.getByText(/教师已审核/)).toBeTruthy()
  expect((screen.getByRole('button',{name:'固定已审核知识版本'}) as HTMLButtonElement).disabled).toBe(false)
 })
+it("requires explicit resolution and saves uncertainty removal with scope and evidence",async()=>{
+ const pending={...item,scope:"pending",body:{...body,uncertainty:"请教师核查是否适合基础复习"}}
+ const run={id:"r",status:"completed",stage:"completed",stale:false,revision:4,input_json:unit,model_json:provider,catalog:[],selected_ids:["k"],items:[pending],checks:[],calls:[]}
+ mock(run)
+ const base=vi.mocked(api).getMockImplementation()!
+ vi.mocked(api).mockImplementation(async(path,init)=>{
+  if(path==="/knowledge/candidates/i"&&init?.method==="PUT")return item
+  return base(path,init)
+ })
+ render(<KnowledgePage onDirtyChange={vi.fn()}/>);fireEvent.click(screen.getByText("已有知识单元与历史批次"))
+ await waitFor(()=>expect(screen.getByRole("option",{name:"方程 · 修订 1"})).toBeTruthy())
+ fireEvent.change(screen.getByLabelText("已有知识单元"),{target:{value:"u"}})
+ await waitFor(()=>expect(screen.getByLabelText("知识候选批次").querySelector('option[value="r"]')).toBeTruthy())
+ fireEvent.change(screen.getByLabelText("知识候选批次"),{target:{value:"r"}})
+ const button=await screen.findByRole("button",{name:"保存疑问处理与适用范围"})
+ expect((button as HTMLButtonElement).disabled).toBe(true)
+ fireEvent.change(screen.getByLabelText("适用范围"),{target:{value:"core"}})
+ fireEvent.change(screen.getByLabelText("教师处理说明"),{target:{value:"已核查定义及成立条件，本条适合基础复习"}})
+ expect((button as HTMLButtonElement).disabled).toBe(true)
+ fireEvent.click(screen.getByLabelText(/我已逐项核查上述疑问/));fireEvent.click(button)
+ await waitFor(()=>expect(vi.mocked(api).mock.calls.some(([p,i])=>p==="/knowledge/candidates/i"&&i?.method==="PUT")).toBe(true))
+ const sent=JSON.parse(vi.mocked(api).mock.calls.find(([p,i])=>p==="/knowledge/candidates/i"&&i?.method==="PUT")![1]!.body as string)
+ expect(sent.body.uncertainty).toBe("");expect(sent.body.statement).toBe(body.statement);expect(sent.scope).toBe("core");expect(sent.review_note).toContain("已核查")
+ expect(vi.mocked(api).mock.calls.some(([p])=>p.endsWith('/review'))).toBe(false)
+})

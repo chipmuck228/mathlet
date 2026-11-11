@@ -94,6 +94,12 @@ def test_scope_uncertainty_can_be_classified_without_rewriting_math(client,monke
     client.put(f"/api/knowledge/candidates/{item['id']}",json={'revision':item['revision'],'body':item['body']|{'uncertainty':''},'scope':'core','review_note':'已核实条件'})
     latest=client.get(f"/api/knowledge/runs/{base['id']}").json()
     assert not any(x.get('origin')=='uncertainty' for x in latest['checks'])
+    assert latest['items'][0]['review_blockers']==[]
+    approved=approve(latest,latest['items'][0])
+    assert approved.status_code==200,approved.text
+    assert approved.json()['items'][0]['review_state']=='approved'
+    history=client.get(f"/api/knowledge/candidates/{item['id']}/history").json()
+    assert '条件a不确定' in json.dumps(history,ensure_ascii=False)
 
 
 def test_coverage_selected_suggestion_drives_bounded_generation(client,monkeypatch):
