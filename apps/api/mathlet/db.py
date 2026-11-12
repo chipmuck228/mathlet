@@ -102,6 +102,9 @@ def init_db():
         init_knowledge(c)
         from .research_models import init_research
         init_research(c)
+        from .editorial import init_editorial
+        init_editorial(c)
+        c.execute("INSERT OR IGNORE INTO schema_migrations VALUES(7,?)", (now(),))
         c.execute("INSERT OR IGNORE INTO schema_migrations VALUES(6,?)", (now(),))
         c.execute("INSERT OR IGNORE INTO schema_migrations VALUES(5,?)", (now(),))
         c.execute("INSERT OR IGNORE INTO schema_migrations VALUES(4,?)", (now(),))

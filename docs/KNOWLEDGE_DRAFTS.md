@@ -1,3 +1,5 @@
+> 当前主界面已改为稿件编制流程，见 [KNOWLEDGE_MANUSCRIPTS.md](KNOWLEDGE_MANUSCRIPTS.md)。下文保留旧逐条审核与任务接口的背景说明，不代表当前主导航的操作步骤。
+
 # 知识草案、定向完善与关系候选使用说明
 
 ## 更新与入口

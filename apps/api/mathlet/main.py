@@ -28,7 +28,7 @@ app = FastAPI(title="Mathlet", version="0.3.0", lifespan=lifespan)
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1", "testserver"])
 @app.exception_handler(RequestValidationError)
 async def redact_provider_validation(request: Request, exc: RequestValidationError):
-    if request.url.path == '/api/knowledge/provider':
+    if request.url.path == '/api/knowledge/provider' or request.url.path.startswith('/api/editor/profiles'):
         return JSONResponse({'detail': [{'loc': error['loc'], 'msg': error['msg'], 'type': error['type']} for error in exc.errors()]}, status_code=422)
     return await request_validation_exception_handler(request, exc)
 
@@ -402,6 +402,9 @@ app.include_router(planning_ai_router)
 
 from .research import router as research_router
 app.include_router(research_router)
+
+from .editorial import router as editorial_router
+app.include_router(editorial_router)
 
 web = ROOT / "apps" / "web" / "dist"
 if web.is_dir():
