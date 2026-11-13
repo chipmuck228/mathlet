@@ -29,3 +29,46 @@ it('opens knowledge generation for a confirmed topic using the planning revision
  const sent=JSON.parse(vi.mocked(api).mock.calls.find(([path])=>path==='/knowledge/units/from-plan')![1]!.body as string)
  expect(sent).toEqual({plan_id:'p',unit_id:'u',plan_revision:1})
 })
+
+it('replaces the unavailable textbook control in AI mode and routes saved plans through confirmation',async()=>{
+ let current={...plan,confirmed:false};const open=vi.fn()
+ vi.mocked(api).mockImplementation(async(path,init)=>{
+  if(path==='/plans')return [current]
+  if(path==='/plans/p/confirm'){const sent=JSON.parse(init!.body as string);expect(sent.revision).toBe(1);expect(sent.acknowledged).toBe(true);current={...current,confirmed:true};return current}
+  if(path==='/knowledge/units/from-plan')return {id:'knowledge-unit'}
+  throw new Error(path)
+ })
+ render(<PlanningPage documents={[]} openSource={vi.fn()} openDraft={vi.fn()} openKnowledge={open}/>);await choose()
+ fireEvent.click(screen.getByRole('button',{name:'2 主题目标与知识生成'}))
+ expect(screen.queryByLabelText('增加教材知识关联')).toBeNull()
+ expect(screen.getByText('对应的二级主题')).toBeTruthy()
+ fireEvent.click(screen.getByRole('button',{name:'按此主题进入知识生成'}))
+ expect(open).not.toHaveBeenCalled();expect(screen.getByLabelText('确认人')).toBeTruthy()
+ expect(vi.mocked(api).mock.calls.some(([p])=>p==='/knowledge/units/from-plan')).toBe(false)
+ fireEvent.click(screen.getByLabelText(/我已核对领域、二级主题/));fireEvent.click(screen.getByRole('button',{name:'确认当前规划'}))
+ await screen.findByText('当前规划已确认，可以继续。')
+ fireEvent.click(screen.getByRole('button',{name:'按此主题进入知识生成'}));await waitFor(()=>expect(open).toHaveBeenCalledWith('knowledge-unit'))
+})
+it('does not send an unsaved or stale planning revision to either downstream entry',async()=>{
+ vi.mocked(api).mockImplementation(async()=>[plan]);const open=vi.fn(),draft=vi.fn()
+ render(<PlanningPage documents={[]} openSource={vi.fn()} openDraft={draft} openKnowledge={open}/>);await choose()
+ fireEvent.click(screen.getByRole('button',{name:'2 主题目标与知识生成'}))
+ fireEvent.change(screen.getByLabelText('学习目标与编写说明'),{target:{value:'尚未保存的目标'}})
+ fireEvent.click(screen.getByRole('button',{name:'按此主题进入知识生成'}));fireEvent.click(screen.getByRole('button',{name:'进入编辑提纲'}))
+ expect(open).not.toHaveBeenCalled();expect(draft).not.toHaveBeenCalled();expect(vi.mocked(api).mock.calls.every(([,i])=>!i?.method)).toBe(true)
+ expect(screen.getByRole('button',{name:'保存当前主题修改'})).toBeTruthy()
+ cleanup();vi.mocked(api).mockImplementation(async()=>[{...plan,stale_sources:['b'],confirmed:false}])
+ render(<PlanningPage documents={[]} openSource={vi.fn()} openDraft={draft} openKnowledge={open}/>);await choose()
+ fireEvent.click(screen.getByRole('button',{name:'2 主题目标与知识生成'}));fireEvent.click(screen.getByRole('button',{name:'进入编辑提纲'}))
+ expect(screen.getByText(/规划来源已变化，请重新载入/)).toBeTruthy();expect(draft).not.toHaveBeenCalled()
+})
+it('keeps manual textbook linking in directory mode and opens confirmed draft with its revision',async()=>{
+ const draft={id:'draft',title:'提纲'},open=vi.fn()
+ vi.mocked(api).mockImplementation(async(path)=>path==='/plans'?[{...plan,payload:{...plan.payload,mode:'catalog'}}]:draft)
+ render(<PlanningPage documents={[]} openSource={vi.fn()} openDraft={open}/>);await choose()
+ fireEvent.click(screen.getByRole('button',{name:'2 小册子单元'}))
+ expect((screen.getByLabelText('增加教材知识关联') as HTMLSelectElement).disabled).toBe(false)
+ fireEvent.click(screen.getByRole('button',{name:'进入编辑提纲'}));await waitFor(()=>expect(open).toHaveBeenCalledWith(draft))
+ const sent=JSON.parse(vi.mocked(api).mock.calls.find(([path])=>path==='/plans/p/units/u/draft')![1]!.body as string)
+ expect(sent).toEqual({revision:1})
+})
