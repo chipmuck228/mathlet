@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { BookOpen, Check, FileCheck2, Files, GitBranch, ListTree, Loader2, MessageSquare, Package, Plus, RefreshCw, Upload } from "lucide-react"
 import PlanningPage from "./PlanningPage"
+import TeachingPage from "./TeachingPage"
 import ResearchPage from "./ResearchManuscriptPage"
 import PaperResearchPage from "./PaperResearchPage"
 import KnowledgePage from "./EditorialKnowledgePage"
@@ -91,6 +92,7 @@ export default function App() {
   const [requestedKnowledgeUnit,setRequestedKnowledgeUnit]=useState("")
   const [planningDirty,setPlanningDirty]=useState(false)
   const [researchDirty,setResearchDirty]=useState(false)
+  const [teachingDirty,setTeachingDirty]=useState(false)
   const [paperDirty,setPaperDirty]=useState(false),[requestedResearchRun,setRequestedResearchRun]=useState("")
   const [knowledgeDirty, setKnowledgeDirty] = useState(false)
   const [requestedBlockId, setRequestedBlockId] = useState("")
@@ -149,6 +151,7 @@ export default function App() {
     } catch (e) { setMessage(String(e)) } finally { setBusy(false) }
   }
   function navigate(next: string) {
+    if (stage === "tasks" && teachingDirty && next !== stage && !window.confirm("有未保存的应用映射或训练修改，离开会丢弃。继续？")) return
     if (stage === "planning" && planningDirty && next !== stage && !window.confirm("有未保存的规划修改，离开会丢弃。继续？")) return
     if (stage === "paper" && paperDirty && next !== stage && !window.confirm("有未保存的整卷修改，离开将丢弃。继续？")) return
     if (stage === "research" && researchDirty && next !== stage && !window.confirm("有未保存的题目或研究修改，离开将丢弃。继续？")) return
@@ -183,13 +186,16 @@ export default function App() {
       </>}
       {stage === "planning" && <PlanningPage onOpenResearch={()=>setStage("research")} onDirtyChange={setPlanningDirty} openKnowledge={id=>{setRequestedKnowledgeUnit(id);setStage("knowledge")}} documents={documents} openSource={(doc, block) => { setRequestedBlockId(block); setDocumentId(doc); setStage("sources") }} openDraft={d => { setDraftId(d.id); void refresh(); setStage("editor") }} />}
       {stage === "tasks" && <>
-        <div className="notice">本页管理文件读取与人工试题提纲。“知识与关系”已提供真实知识草案 Agent；单题解法、OCR 和自动分题尚未接入，“创建提纲”仍不生成解答。</div>
+        <TeachingPage onDirtyChange={setTeachingDirty} onOpenPaper={()=>setStage("paper")} onOpenResearch={()=>setStage("research")} />
+        <details className="surface"><summary>文件读取与旧版人工编辑提纲</summary><fieldset disabled={teachingDirty}>
+        <div className="notice">下列为既有文件读取任务与人工提纲入口。小节应用与训练使用上方工作流；旧版“创建提纲”不会生成解答。</div>
         <section className="surface"><h2>文件读取任务</h2>{jobs.length ? jobs.map(j => <div className="job" key={j.id}><div><h3>{j.name}</h3><p className="muted small">{j.message}</p></div><span className="label">{statuses[j.status]}</span>{j.status === "failed" && <Button variant="outline" size="sm" onClick={async () => { try { await api(`/jobs/${j.id}/retry`, { method: "POST" }); await refresh() } catch (e) { setMessage(String(e)) } }}>重试</Button>}</div>) : <p className="muted">上传资料后，任务会保存在本机数据库中。</p>}</section>
         <section className="surface"><h2>从已核对内容建立单元</h2><p className="muted small">来源选择与“原题核对”页当前资料一致。支持跨内容块组合；跨文档组合将在后续完善。</p>
           <select aria-label="选择提纲来源资料" value={documentId} onChange={e => setDocumentId(e.target.value)}><option value="">选择资料</option>{documents.filter(d => d.status === "ready").map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select>
           <div className="source-choices">{blocks.filter(b => b.verified).map(b => <label className="checkline" key={b.id}><input type="checkbox" checked={selected.includes(b.id)} onChange={e => setSelected(old => e.target.checked ? [...old, b.id] : old.filter(id => id !== b.id))} /><span>{b.locator} · {b.text.slice(0, 85)}</span></label>)}{!blocks.some(b => b.verified) && <p className="muted">当前资料暂无已确认内容，请先进行原题核对。</p>}</div>
           <label htmlFor="new-title">单元标题</label><input id="new-title" value={title} maxLength={120} onChange={e => setTitle(e.target.value)} placeholder="例如：反比例函数与面积最值" /><div className="actions"><Button onClick={createDraft} disabled={busy || !title.trim() || !selected.length}><Plus />创建编辑提纲</Button></div>
         </section>
+        </fieldset></details>
       </>}
       {stage === "editor" && <><div className="mb-5">{draftPicker}</div>{draft ? <DraftEditor key={draft.id} draft={draft} onSaved={() => void refresh()} /> : <div className="empty"><MessageSquare /><p>从任务页选取已核对来源，创建第一个单元。</p></div>}</>}
       {stage === "preview" && <><div className="actions mb-5">{draftPicker}{draft && <Button variant="outline" asChild><a href={`/api/drafts/${draft.id}/preview`} target="_blank" rel="noreferrer">打开阅读版 / 浏览器打印 PDF</a></Button>}</div>{draft ? <><p className="muted small">显示已保存内容。此预览尚未提供专业分页、公式输入器与图形重绘。</p><iframe className="book-preview" title="小册子阅读预览" key={`${draft.id}-${draft.revision}-${draft.approved}`} src={`/api/drafts/${draft.id}/preview`} sandbox="allow-same-origin allow-modals" /></> : <div className="empty"><BookOpen /><p>选择一个单元查看学生阅读版。</p></div>}</>}
