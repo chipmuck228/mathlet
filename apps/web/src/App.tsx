@@ -3,7 +3,8 @@ import { BookOpen, Check, FileCheck2, Files, GitBranch, ListTree, Loader2, Messa
 import PlanningPage from "./PlanningPage"
 import ResearchPage from "./ResearchManuscriptPage"
 import KnowledgePage from "./EditorialKnowledgePage"
-import ContinuousReview from "./ContinuousReview"
+import SourceReview from "./SourceReview"
+import SourceReviewFiles from "./SourceReviewFiles"
 import { Button } from "@/components/ui/button"
 import { api, json, type Block, type Comment, type Document, type Draft, type Job, type Release } from "@/lib/api"
 
@@ -82,6 +83,7 @@ export default function App() {
   const [drafts, setDrafts] = useState<Draft[]>([])
   const [releases, setReleases] = useState<Release[]>([])
   const [documentId, setDocumentId] = useState("")
+  const [sourceSaving,setSourceSaving]=useState(false),[sourceReviewListVersion,setSourceReviewListVersion]=useState(0),[sourceReviewOpenKey,setSourceReviewOpenKey]=useState(0)
   const [blocks, setBlocks] = useState<Block[]>([])
   const [sourceDirty, setSourceDirty] = useState(false)
   const [requestedKnowledgeUnit,setRequestedKnowledgeUnit]=useState("")
@@ -169,10 +171,10 @@ export default function App() {
         <p className="muted small mt-6">原件、数据库和交付文件位于本地 data 目录，默认不会进入 Git。资料读取不发送原件给模型。知识草案可在“知识与关系”配置服务并显式触发；外部 OCR 尚未接入。</p>
       </>}
       {stage === "sources" && <>
-        <div className="actions mb-5"><select aria-label="选择资料" value={documentId} onChange={e => { if (!sourceDirty || window.confirm("有未保存的核对修改，切换将丢弃。继续？")) { setRequestedBlockId(""); setDocumentId(e.target.value) } }}><option value="">选择资料</option>{documents.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></div>
+        <div className="actions mb-5"><select aria-label="选择资料" disabled={sourceSaving} value={documentId} onChange={e => { if (!sourceDirty || window.confirm("有未保存的核对修改，切换将丢弃。继续？")) { setRequestedBlockId(""); setDocumentId(e.target.value) } }}><option value="">选择资料</option>{documents.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select><SourceReviewFiles documentId={documentId} refreshKey={sourceReviewListVersion} disabled={sourceDirty||sourceSaving} onOpen={id=>{setRequestedBlockId("");setDocumentId(id);setSourceReviewOpenKey(n=>n+1)}}/></div>
         {document && docStatus !== "ready" && <div className="notice">资料状态：{statuses[docStatus || ""]}。请查看任务页了解读取进度。</div>}
-        {document && blocks.length > 0 && <ContinuousReview key={documentId} blocks={blocks} documentId={documentId} kind={document.kind} focusId={requestedBlockId} onDirtyChange={setSourceDirty} onSaved={saved => { const updates = new Map(saved.map(b => [b.id, b])); setBlocks(old => old.map(b => updates.get(b.id) || b)); void refresh() }} />}
-        {!document && <div className="empty"><FileCheck2 /><p>选择资料，连续阅读并编辑左侧内容，右侧对照原始证据。</p></div>}
+        {document && docStatus === "ready" && <SourceReview key={`${documentId}-${sourceReviewOpenKey}`} documentId={documentId} kind={document.kind} focusId={requestedBlockId} onDirtyChange={setSourceDirty} onBusyChange={setSourceSaving} onReviewSaved={()=>setSourceReviewListVersion(n=>n+1)} onSaved={saved=>{setBlocks(saved);void refresh()}} />}
+        {!document && <div className="empty"><FileCheck2 /><p>选择原始资料或已保存的核对文件，左侧编辑与人工核对，右侧对照原文。</p></div>}
       </>}
       {stage === "planning" && <PlanningPage onDirtyChange={setPlanningDirty} openKnowledge={id=>{setRequestedKnowledgeUnit(id);setStage("knowledge")}} documents={documents} openSource={(doc, block) => { setRequestedBlockId(block); setDocumentId(doc); setStage("sources") }} openDraft={d => { setDraftId(d.id); void refresh(); setStage("editor") }} />}
       {stage === "tasks" && <>

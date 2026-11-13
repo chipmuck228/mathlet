@@ -106,6 +106,9 @@ def init_db():
         init_editorial(c)
         from .research_editor import init_research_editor
         init_research_editor(c)
+        from .source_review import init_source_review
+        init_source_review(c)
+        c.execute("INSERT OR IGNORE INTO schema_migrations VALUES(9,?)", (now(),))
         c.execute("INSERT OR IGNORE INTO schema_migrations VALUES(8,?)", (now(),))
         c.execute("INSERT OR IGNORE INTO schema_migrations VALUES(7,?)", (now(),))
         c.execute("INSERT OR IGNORE INTO schema_migrations VALUES(6,?)", (now(),))

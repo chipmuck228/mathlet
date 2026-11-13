@@ -5,7 +5,7 @@ import { api, json, type Block } from "@/lib/api"
 
 const FormulaEditor = lazy(() => import("./FormulaEditor"))
 
-export default function MathBlockEditor({ block, text, disabled, onChange, onFocus }: { block: Block; text: string; disabled: boolean; onChange: (text: string) => void; onFocus: () => void }) {
+export default function MathBlockEditor({ block, text, disabled, onChange, onFocus, saveHint }: { saveHint?: string; block: Block; text: string; disabled: boolean; onChange: (text: string) => void; onFocus: () => void }) {
   const [draft, setDraft] = useState<string | null>(null)
   const [editing, setEditing] = useState<{ start: number; end: number; latex: string } | null>(null)
   const input = useRef<HTMLTextAreaElement>(null)
@@ -48,7 +48,7 @@ export default function MathBlockEditor({ block, text, disabled, onChange, onFoc
       <p className="muted small">正文中的公式用 {String.raw`\( … \)`} 标记；标记内可直接输入 x^2 或 {String.raw`\frac{1}{x}`}。普通文字不需要标记。</p>
       <div className="actions"><h3>连续阅读预览</h3><Button variant="outline" disabled={previewBusy} onClick={refreshPreview}>{previewBusy ? "正在预览…" : "刷新公式预览"}</Button></div>{previewError && <p role="alert">{previewError}</p>}<div className="block-reading">{preview(draft, true)}</div>
       <div className="actions"><Button onClick={() => { onChange(draft); setDraft(null) }}>应用完整内容</Button><Button variant="outline" onClick={() => setDraft(null)}>取消修改</Button></div>
-      <p className="muted small">应用后仍需在审核页面“保存核对结果”。取消不会更改原文。</p>
+      <p className="muted small">{saveHint || "应用后仍需在审核页面“保存核对结果”。取消不会更改原文。"}</p>
     </section></div>}
     {editing && draft !== null && <Suspense fallback={<p role="status">正在加载公式编辑器…</p>}><FormulaEditor initial={editing.latex} onClose={() => setEditing(null)} onApply={(latex, markup) => { setRendered(old => ({ ...old, [latex]: markup })); setDraft(putFormula(draft, editing.start, editing.end, latex)); setEditing(null) }} /></Suspense>}
   </div>

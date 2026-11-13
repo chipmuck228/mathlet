@@ -64,7 +64,10 @@ def test_real_workflow_release_immutability_and_review_invalidation(client):
     download = f"/api/releases/{release}/download"
     snapshot = client.get(download).text
     assert "教师A" in snapshot
-    verified(client, block)  # Source revision changes: approval must be invalidated.
+    verified(client, block)  # Rechecking unchanged text must not invalidate downstream content.
+    assert client.get("/api/drafts").json()[0]["approved"]
+    changed = client.put(f"/api/blocks/{block['id']}", json={"revision": block["revision"], "text": block["text"] + "再次检查范围。", "verified": True})
+    assert changed.status_code == 200  # A real source-text change still invalidates approval.
     current = client.get("/api/drafts").json()[0]
     assert current["revision"] == 3 and not current["approved"]
     assert client.post(path + "/approve", json={"revision": 2, "reviewer": "教师A", "confirmed": True}).status_code == 409

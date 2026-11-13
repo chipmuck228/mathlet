@@ -62,12 +62,14 @@ def test_old_content_and_confirmation_are_not_overwritten_by_candidates(client):
     init_db();assert client.get(f'/api/documents/{doc}/blocks').json()[0]==before
 
 
-def test_bad_formula_cannot_be_confirmed_and_does_not_partially_save(client):
+def test_human_confirmation_keeps_unrenderable_formula_text_without_blocking(client):
     doc,block=upload(client)
     for invalid in [r'\(\frac{}{x}\)',r'\(\href{javascript:alert(1)}{x}\)',r'\(x^{2}',r'\(x^\)', '【未转换公式，请对照原件并替换】']:
-        r=client.put(f'/api/documents/{doc}/blocks/review',json={'changes':[dict(id=block['id'],revision=1,text=invalid,verified=True)]})
-        assert r.status_code==422,r.text
-    assert client.get(f'/api/documents/{doc}/blocks').json()[0]['revision']==1
+        r=client.put(f'/api/documents/{doc}/blocks/review',json={'changes':[dict(id=block['id'],revision=block['revision'],text=invalid,verified=True)]})
+        assert r.status_code==200,r.text
+        block=r.json()[0]
+        assert block['text']==invalid and block['verified']
+    assert client.get(f'/api/documents/{doc}/blocks').json()[0]['text']==invalid
     assert client.post('/api/formulas/preview',json={'latex':r'\frac{1}{x}'}).status_code==200
     assert client.post('/api/formulas/preview',json={'latex':r'\includegraphics{http://example.com/x}'}).status_code==422
 

@@ -40,3 +40,7 @@ body{--keyboard-zindex:2100}
 .manuscript-transcript{max-height:42vh;overflow:auto;overscroll-behavior:contain;padding-right:5px}
 
 .research-section-link{display:block;width:100%;text-align:left;background:transparent;border:0;border-bottom:1px solid var(--border);padding:9px 4px;color:#52715b}.manuscript-field{scroll-margin-top:16px}
+
+.source-review-filebar{margin:0 0 20px}.source-review-filebar>.actions{margin:12px 0}.source-review-columns .review-block-meta button{cursor:pointer}.source-review-columns .review-block-meta button:disabled{cursor:default}.source-review-columns .review-block-meta button[data-slot=button]{padding:4px 10px;background:var(--primary);color:var(--primary-foreground)}
+
+.source-review-columns .review-block-meta .source-reviewed-button{padding:4px 10px;background:var(--primary);color:var(--primary-foreground)}

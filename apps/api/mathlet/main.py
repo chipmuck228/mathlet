@@ -155,22 +155,16 @@ class BlockEdit(BaseModel):
 
 
 def apply_block_edits(c, changes):
-    """Validate the entire range before writing; invalidate each dependent once."""
+    """Check revisions atomically; human confirmation does not depend on formula syntax."""
     old_rows = {}
     for key, body in changes:
         old = get_row(c, "blocks", key)
         require_revision(old, body.revision)
-        if body.verified:
-            if UNSUPPORTED in body.text or "，请合并核对】" in body.text:
-                raise HTTPException(422, "请先修正未转换公式及上下标提示，再确认此内容")
-            try:
-                parts_from_text(body.text, strict=True)
-            except ValueError as exc:
-                raise HTTPException(422, str(exc)) from exc
         old_rows[key] = old
-    for key, body in changes:
+    changed = [(key,body) for key,body in changes if body.text != old_rows[key]["text"] or bool(body.verified) != bool(old_rows[key]["verified"])]
+    for key, body in changed:
         c.execute("UPDATE blocks SET text=?,verified=?,revision=revision+1 WHERE id=?", (body.text, int(body.verified), key))
-    keys = set(old_rows)
+    keys = {key for key,_ in changed}
     affected = set()
     for draft in c.execute("SELECT id,source_ids FROM drafts").fetchall():
         if keys.intersection(json.loads(draft["source_ids"])):
@@ -180,11 +174,14 @@ def apply_block_edits(c, changes):
         requirements = {r["source_id"] for r in payload["requirements"]}
         if any(key in payload["source_revisions"] and
                (body.text != old_rows[key]["text"] or (key in requirements and not body.verified))
-               for key, body in changes):
+               for key, body in changed):
             c.execute("UPDATE plans SET confirmed_revision=NULL,reviewer=NULL WHERE id=?", (plan["id"],))
             affected.update(r["draft_id"] for r in c.execute("SELECT draft_id FROM plan_draft_links WHERE plan_id=?", (plan["id"],)))
     for draft_id in affected:
         c.execute("UPDATE drafts SET revision=revision+1,approved_revision=NULL,reviewer=NULL WHERE id=?", (draft_id,))
+    from .source_review import snapshot_review
+    for document_id in {value["document_id"] for value in old_rows.values()}:
+        snapshot_review(c, document_id, [(key,body) for key,body in changes if old_rows[key]["document_id"] == document_id])
     return [block_json(get_row(c, "blocks", key)) for key, _ in changes]
 
 
@@ -192,7 +189,10 @@ def apply_block_edits(c, changes):
 def edit_block(block_id: str, body: BlockEdit):
     with connect() as c:
         c.execute("BEGIN IMMEDIATE")
-        return apply_block_edits(c, [(block_id, body)])[0]
+        updated = apply_block_edits(c, [(block_id, body)])[0]
+    from .source_review import result
+    result(updated["document_id"])
+    return updated
 
 
 class RangeBlockEdit(BlockEdit):
@@ -214,7 +214,10 @@ def review_range(document_id: str, body: RangeReview):
         for key in ids:
             if get_row(c, "blocks", key)["document_id"] != document_id:
                 raise HTTPException(422, "不能跨资料保存核对范围")
-        return apply_block_edits(c, [(b.id, b) for b in body.changes])
+        updated = apply_block_edits(c, [(b.id, b) for b in body.changes])
+    from .source_review import result
+    result(document_id)
+    return updated
 
 
 class NewDraft(BaseModel):
@@ -408,6 +411,9 @@ app.include_router(editorial_router)
 
 from .research_editor import router as research_editor_router
 app.include_router(research_editor_router)
+
+from .source_review import router as source_review_router
+app.include_router(source_review_router)
 
 web = ROOT / "apps" / "web" / "dist"
 if web.is_dir():
