@@ -421,6 +421,9 @@ app.include_router(paper_router)
 from .teaching import router as teaching_router
 app.include_router(teaching_router)
 
+from .exam_extraction import router as exam_router
+app.include_router(exam_router)
+
 web = ROOT / "apps" / "web" / "dist"
 if web.is_dir():
     app.mount("/", StaticFiles(directory=web, html=True), name="web")

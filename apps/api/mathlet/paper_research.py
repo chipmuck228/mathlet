@@ -30,6 +30,10 @@ def source_snapshot(c,document_id):
     identity={'document_id':document_id,'original_hash':source_identity(document),'blocks':blocks}
     return identity|{'fingerprint':digest(identity),'review':saved['review'],'document_name':document['name'],'category':document['category']}
 def project_current(c,p):
+    source=json.loads(p['source'])
+    if source.get('exam_extraction_version_id'):
+        from .exam_extraction import version_current as exam_version_current
+        return exam_version_current(c,source['exam_extraction_version_id'])
     try:return source_snapshot(c,p['document_id'])['fingerprint']==json.loads(p['source'])['fingerprint']
     except (HTTPException,OSError):return False
 
@@ -59,7 +63,7 @@ def resolve(p,body):
         for index,span in enumerate(body[role+'_spans']):
             try:
                 b=blocks.get(span['block_id'])
-                if not b or not b['verified']:raise ValueError('定位块不存在或尚未人工核对')
+                if not b or not b['verified'] and not source.get('exam_extraction_version_id'):raise ValueError('定位块不存在或尚未人工核对')
                 start=locate(b['text'],span['start_anchor'],span['start_occurrence']) if span['start_anchor'] else 0
                 end=locate(b['text'],span['end_anchor'],span['end_occurrence'])+len(span['end_anchor']) if span['end_anchor'] else len(b['text'])
                 if end<=start:raise ValueError('终点必须在起点之后')
@@ -68,15 +72,19 @@ def resolve(p,body):
                 parts.append(part);ranges.append({'role':role,'index':index,'block_id':b['id'],'locator':b['locator'],'start':start,'end':end})
             except ValueError as exc:errors.append(f'{role} 第{index+1}段：{exc}')
         texts[role]='\n\n'.join(parts)
+    if source.get('exam_extraction_version_id') and body.get('statement_override') is not None:errors=[]
     selected=[]
     for aid in body['asset_ids']:
         a=assets.get(aid)
-        if not a or not blocks[a['block_id']]['verified'] or not a['hash']:errors.append('配图不存在、未核对或文件缺失：'+aid)
+        if not a or not blocks[a['block_id']]['verified'] and not source.get('exam_extraction_version_id') or not a['hash']:errors.append('配图不存在、未核对或文件缺失：'+aid)
         else:selected.append(a)
+    if body.get('statement_override') is not None:texts['question']=body['statement_override']
+    if body.get('answer_override') is not None:texts['answer']=body['answer_override']
     return {'statement':texts['question'],'reference_answer':texts['answer'],'ranges':ranges,'assets':selected,'errors':errors}
 
 def coverage(p,items):
     source=json.loads(p['source']);ranges={};overlaps=[]
+    if source.get('exam_extraction_version_id'):return {'overlaps':[],'unassigned':[],'unchecked_blocks':[],'unassigned_assets':[]}
     for item in items:
         for r in item['resolved']['ranges']:
             bucket=ranges.setdefault(r['block_id'],[])
@@ -221,7 +229,7 @@ def save_item(project_id:str,item_id:str,body:SaveItem):
         payload=body.body.model_dump();old=json.loads(i['payload']);known={x['ref'] for x in json.loads(p['knowledge'])}
         if len(set(payload['knowledge_refs']))!=len(payload['knowledge_refs']) or not set(payload['knowledge_refs'])<=known:raise HTTPException(422,'知识选择重复或不在本卷知识池中')
         c.execute('INSERT INTO paper_item_history VALUES(?,?,?,?,?)',(uid(),item_id,i['revision'],packed(dict(i)),now()))
-        changed=any(old[k]!=payload[k] for k in payload if k not in {'knowledge_refs','recommendations','knowledge_gaps','boundary_note'})
+        changed=any(old.get(k)!=payload[k] for k in payload if k not in {'knowledge_refs','recommendations','knowledge_gaps','boundary_note'})
         qid=i['question_id']
         if changed and qid:
             q=row(c,'research_questions',qid)

@@ -43,3 +43,18 @@ it('keeps cards as drafts until explicit teacher confirmation and offers inline 
  fireEvent.click(screen.getByRole('button',{name:'保存思路卡修订'}));await waitFor(()=>expect(vi.mocked(api).mock.calls.some(([p,i])=>p==='/papers/p/cards/card'&&i?.method==='PUT')).toBe(true))
  expect(vi.mocked(api).mock.calls.some(([p])=>p.endsWith('/finalize'))).toBe(false)
 })
+
+it('opens a whole-exam final directly without asking for another split or block verification',async()=>{
+ mock();const base=vi.mocked(api).getMockImplementation()!
+ vi.mocked(api).mockImplementation(async(path,init)=>{
+ if(path==='/exam-extraction-versions')return [{id:'ev',document_name:'整题试卷',filename:'exam-V1.json',stale:false}]
+ if(path==='/exam-extraction-versions/ev/paper')return structuredClone(project)
+ return base(path,init)
+ })
+ render(<PaperResearchPage onDirtyChange={vi.fn()} onOpenRun={vi.fn()}/>);
+ await screen.findByRole('option',{name:/整题试卷（整题已定稿）/})
+ fireEvent.change(screen.getByLabelText('核对结果文件'),{target:{value:'exam:ev'}})
+ fireEvent.click(screen.getByRole('button',{name:'建立整卷记录'}))
+ await waitFor(()=>expect(vi.mocked(api).mock.calls.some(([p,i])=>p==='/exam-extraction-versions/ev/paper'&&i?.method==='POST')).toBe(true))
+ expect(vi.mocked(api).mock.calls.some(([p])=>p.endsWith('/split'))).toBe(false)
+})

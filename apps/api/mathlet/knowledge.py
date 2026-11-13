@@ -32,6 +32,9 @@ def current(c, run):
     unit=row(c,'knowledge_units',run['unit_id'])
     if unit['revision']!=run['input_revision'] or origin_stale(c,unit): return False
     snapshot=json.loads(run['input_json'])
+    if snapshot.get('exam_task'):
+        from .exam_extraction import exam_task_current
+        return exam_task_current(c,snapshot['exam_task'])
     if snapshot.get('teaching_task'):
         from .teaching import teaching_current
         return teaching_current(c,snapshot['teaching_task'])
@@ -126,7 +129,7 @@ def configure_provider(body: Provider): return save_provider(body)
 
 @router.get('/units')
 def units():
-    with connect() as c: return [unit_json(c,r) for r in c.execute('SELECT * FROM knowledge_units ORDER BY created_at DESC') if not any(json.loads(r['origin']).get(k) for k in ['internal_planning','internal_research','internal_paper','internal_teaching'])]
+    with connect() as c: return [unit_json(c,r) for r in c.execute('SELECT * FROM knowledge_units ORDER BY created_at DESC') if not any(json.loads(r['origin']).get(k) for k in ['internal_planning','internal_research','internal_paper','internal_teaching','internal_exam'])]
 
 @router.post('/units',status_code=201)
 def create_unit(body: UnitInput):

@@ -14,6 +14,8 @@ class Recommendation(Strict):
     reason:str=Field(min_length=1,max_length=1200)
     evidence:str=Field(default='',max_length=500)
 class PaperItem(Strict):
+    statement_override:str|None=Field(default=None,max_length=16000)
+    answer_override:str|None=Field(default=None,max_length=16000)
     title:str=Field(min_length=1,max_length=160)
     number:str=Field(default='',max_length=80)
     question_spans:list[Span]=Field(min_length=1,max_length=30)

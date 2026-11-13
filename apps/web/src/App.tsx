@@ -5,7 +5,8 @@ import TeachingPage from "./TeachingPage"
 import ResearchPage from "./ResearchManuscriptPage"
 import PaperResearchPage from "./PaperResearchPage"
 import KnowledgePage from "./EditorialKnowledgePage"
-import SourceReview from "./SourceReview"
+import SourceReview from "./ExamSourceReview"
+import LegacySourceReview from "./SourceReview"
 import SourceReviewFiles from "./SourceReviewFiles"
 import { Button } from "@/components/ui/button"
 import { api, json, type Block, type Comment, type Document, type Draft, type Job, type Release } from "@/lib/api"
@@ -179,10 +180,10 @@ export default function App() {
         <p className="muted small mt-6">原件、数据库和交付文件位于本地 data 目录，默认不会进入 Git。资料读取不发送原件给模型。知识草案可在“知识与关系”配置服务并显式触发；外部 OCR 尚未接入。</p>
       </>}
       {stage === "sources" && <>
-        <div className="actions mb-5"><select aria-label="选择资料" disabled={sourceSaving} value={documentId} onChange={e => { if (!sourceDirty || window.confirm("有未保存的核对修改，切换将丢弃。继续？")) { setRequestedBlockId(""); setDocumentId(e.target.value) } }}><option value="">选择资料</option>{documents.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select><SourceReviewFiles documentId={documentId} refreshKey={sourceReviewListVersion} disabled={sourceDirty||sourceSaving} onOpen={id=>{setRequestedBlockId("");setDocumentId(id);setSourceReviewOpenKey(n=>n+1)}}/></div>
+        <div className="actions mb-5"><select aria-label="选择资料" disabled={sourceSaving} value={documentId} onChange={e => { if (!sourceDirty || window.confirm("有未保存的核对修改，切换将丢弃。继续？")) { setRequestedBlockId(""); setDocumentId(e.target.value) } }}><option value="">选择资料</option>{documents.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select><details><summary>旧版逐块核对文件（兼容）</summary><SourceReviewFiles documentId={documentId} refreshKey={sourceReviewListVersion} disabled={sourceDirty||sourceSaving} onOpen={id=>{setRequestedBlockId("");setDocumentId(id);setSourceReviewOpenKey(n=>n+1)}}/></details></div>
         {document && docStatus !== "ready" && <div className="notice">资料状态：{statuses[docStatus || ""]}。请查看任务页了解读取进度。</div>}
-        {document && docStatus === "ready" && <SourceReview key={`${documentId}-${sourceReviewOpenKey}`} documentId={documentId} kind={document.kind} focusId={requestedBlockId} onDirtyChange={setSourceDirty} onBusyChange={setSourceSaving} onReviewSaved={()=>setSourceReviewListVersion(n=>n+1)} onSaved={saved=>{setBlocks(saved);void refresh()}} />}
-        {!document && <div className="empty"><FileCheck2 /><p>选择原始资料或已保存的核对文件，左侧编辑与人工核对，右侧对照原文。</p></div>}
+        {document && docStatus === "ready" && (["standard","textbook"].includes(document.category)?<LegacySourceReview documentId={documentId} kind={document.kind} focusId={requestedBlockId} onDirtyChange={setSourceDirty} onBusyChange={setSourceSaving} onReviewSaved={()=>setSourceReviewListVersion(n=>n+1)} onSaved={saved=>{setBlocks(saved);void refresh()}}/>:<SourceReview key={`${documentId}-${sourceReviewOpenKey}`} documentId={documentId} kind={document.kind} focusId={requestedBlockId} onContinueResearch={()=>setStage("research")} onDirtyChange={setSourceDirty} onBusyChange={setSourceSaving} onReviewSaved={()=>setSourceReviewListVersion(n=>n+1)} onSaved={saved=>{setBlocks(saved);void refresh()}} />)}
+        {!document && <div className="empty"><FileCheck2 /><p>选择原始试卷，AI先整理完整题目与原文解答，再整卷审阅、编辑并统一定稿。</p></div>}
       </>}
       {stage === "planning" && <PlanningPage onOpenResearch={()=>setStage("research")} onDirtyChange={setPlanningDirty} openKnowledge={id=>{setRequestedKnowledgeUnit(id);setStage("knowledge")}} documents={documents} openSource={(doc, block) => { setRequestedBlockId(block); setDocumentId(doc); setStage("sources") }} openDraft={d => { setDraftId(d.id); void refresh(); setStage("editor") }} />}
       {stage === "tasks" && <>
