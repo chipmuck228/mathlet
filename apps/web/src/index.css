@@ -38,3 +38,5 @@ body{--keyboard-zindex:2100}
 @media(max-width:760px){.manuscript-grid{grid-template-columns:1fr}.manuscript-list{grid-row:auto;position:static;max-height:300px;border-bottom:1px solid var(--border);border-right:0}.manuscript-chat{grid-column:1}.manuscript-body{padding:18px}.manuscript-topline{display:block}}
 
 .manuscript-transcript{max-height:42vh;overflow:auto;overscroll-behavior:contain;padding-right:5px}
+
+.research-section-link{display:block;width:100%;text-align:left;background:transparent;border:0;border-bottom:1px solid var(--border);padding:9px 4px;color:#52715b}.manuscript-field{scroll-margin-top:16px}

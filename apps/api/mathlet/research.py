@@ -261,7 +261,8 @@ def edit_output(output_id:str,body:OutputEdit):
         c.execute('BEGIN IMMEDIATE');old=row(c,'research_outputs',output_id);revision(old,body.revision);run=row(c,'knowledge_runs',old['run_id']);meta=json.loads(run['input_json'])['research_task']
         if run['status']!='completed' or not sources_current(c,meta):raise HTTPException(409,'任务未完成或依据过期，输入未覆盖')
         try:
-            valid=(Relation if old['kind']=='relation' else Analysis).model_validate(body.body).model_dump();validate_references(valid,old['kind'],row(c,'research_contexts',old['context_id']))
+            from .research_editor import analysis_schema
+            valid=(Relation if old['kind']=='relation' else analysis_schema(meta)).model_validate(body.body).model_dump();validate_references(valid,old['kind'],row(c,'research_contexts',old['context_id']))
         except ValueError as exc:raise HTTPException(422,str(exc)) from None
         c.execute('INSERT INTO research_output_history VALUES(?,?,?,?,?)',(uid(),output_id,old['revision'],packed(old),now()))
         c.execute("UPDATE research_outputs SET body=?,revision=revision+1,state='pending',reviewer='',note='' WHERE id=?",(packed(valid),output_id))

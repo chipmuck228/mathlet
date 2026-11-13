@@ -44,6 +44,11 @@ class Analysis(Strict):
     variation_prompts:list[str]=Field(max_length=8)
     scope_notes:list[str]=Field(max_length=10)
     missing_information:list[str]=Field(max_length=10)
+class AuthoringAnalysis(Analysis):
+    given_conditions:list[str]=Field(min_length=1,max_length=16)
+    goals:list[str]=Field(min_length=1,max_length=10)
+    thinking_operations:list[str]=Field(min_length=1,max_length=12)
+
 class ReviewIssue(Strict):
     approach_id:str=''
     category:Literal['correctness','source','condition','scope','teaching']

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { BookOpen, Check, FileCheck2, Files, GitBranch, ListTree, Loader2, MessageSquare, Package, Plus, RefreshCw, Upload } from "lucide-react"
 import PlanningPage from "./PlanningPage"
-import ResearchPage from "./ResearchPage"
+import ResearchPage from "./ResearchManuscriptPage"
 import KnowledgePage from "./EditorialKnowledgePage"
 import ContinuousReview from "./ContinuousReview"
 import { Button } from "@/components/ui/button"

@@ -406,6 +406,9 @@ app.include_router(research_router)
 from .editorial import router as editorial_router
 app.include_router(editorial_router)
 
+from .research_editor import router as research_editor_router
+app.include_router(research_editor_router)
+
 web = ROOT / "apps" / "web" / "dist"
 if web.is_dir():
     app.mount("/", StaticFiles(directory=web, html=True), name="web")
