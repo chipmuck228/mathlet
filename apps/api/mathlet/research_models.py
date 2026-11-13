@@ -55,6 +55,12 @@ class ReviewIssue(Strict):
     message:str=Field(min_length=1,max_length=2500)
 class Critic(Strict):
     issues:list[ReviewIssue]=Field(max_length=30)
+class SourceRange(Strict):
+    block_id:str
+    role:Literal['question','answer']
+    start:int=Field(ge=0)
+    end:int=Field(ge=1)
+
 class QuestionBody(Strict):
     title:str=Field(min_length=1,max_length=160)
     question_block_ids:list[str]=Field(min_length=1,max_length=30)
@@ -68,6 +74,8 @@ class QuestionBody(Strict):
     year:str=Field(default='',max_length=20)
     number:str=Field(default='',max_length=80)
     notes:str=Field(default='',max_length=3000)
+    selected_assets:list[str]|None=Field(default=None,max_length=100)
+    source_ranges:list[SourceRange]=Field(default_factory=list,max_length=60)
 
 
 def init_research(c):

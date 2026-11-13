@@ -92,3 +92,12 @@ it('confirming an unchanged complete question does not re-save or invalidate its
  await waitFor(()=>expect(vi.mocked(api)).toHaveBeenCalledWith('/research/questions/q/confirm',expect.objectContaining({method:'POST'})))
  expect(vi.mocked(api).mock.calls.some(([p,i])=>p==='/research/questions/q'&&i?.method==='PUT')).toBe(false)
 })
+
+it('opens the exact research run selected from the paper workflow instead of the latest run',async()=>{
+ mock();const base=vi.mocked(api).getMockImplementation()!
+ vi.mocked(api).mockImplementation(async(path,init)=>path==='/research-editor/runs/selected'?{...task,id:'selected',title:'整卷中选定的题目'}:base(path,init))
+ render(<ResearchManuscriptPage initialRunId="selected" documents={[]} onDirtyChange={vi.fn()} openKnowledge={vi.fn()}/>);
+ await screen.findByRole('navigation',{name:'研究目录'})
+ expect(vi.mocked(api).mock.calls.some(([p])=>p==='/research-editor/runs/selected')).toBe(true)
+ expect(vi.mocked(api).mock.calls.some(([p])=>p==='/research-editor/runs/r')).toBe(false)
+})

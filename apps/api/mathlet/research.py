@@ -76,19 +76,25 @@ def validate_text(text):
 def capture_question(c,body):
     ids=body.question_block_ids+body.answer_block_ids
     if len(set(body.question_block_ids))!=len(body.question_block_ids) or len(set(body.answer_block_ids))!=len(body.answer_block_ids):raise HTTPException(422,'同一角色的来源块不可重复')
-    sources=[];assets=[];seen=set()
+    sources=[];assets=[];seen=set();available_assets=set()
     for key in dict.fromkeys(ids):
         block=row(c,'blocks',key);document=row(c,'documents',block['document_id'])
         if document['status']!='ready':raise HTTPException(409,'原始资料尚未就绪')
         sources.append({'id':key,'document_id':document['id'],'document_name':document['name'],'category':document['category'],'locator':block['locator'],'text':block['text'],'revision':block['revision'],'verified':bool(block['verified']),'hash':hashlib.sha256(block['text'].encode()).hexdigest()})
         if key in body.question_block_ids:
             for name in json.loads(block['assets']):
+                available_assets.add(document['id']+'/'+name)
+                if body.selected_assets is not None and document['id']+'/'+name not in body.selected_assets:continue
                 if Path(name).name!=name:raise HTTPException(422,'配图路径无效')
                 if (document['id'],name) in seen:continue
                 path=data_dir()/'documents'/document['id']/'assets'/name
                 if not path.is_file():raise HTTPException(422,'原题配图缺失，请恢复后核对')
                 content=path.read_bytes();seen.add((document['id'],name))
                 assets.append({'document_id':document['id'],'name':name,'url':f"/api/documents/{document['id']}/assets/{name}",'hash':hashlib.sha256(content).hexdigest()})
+    byid={x['id']:x for x in sources}
+    for r in body.source_ranges:
+        if r.block_id not in byid or r.end<=r.start or r.end>len(byid[r.block_id]['text']) or r.block_id not in (body.question_block_ids if r.role=='question' else body.answer_block_ids):raise HTTPException(422,'题目原文范围无效')
+    if body.selected_assets is not None and not set(body.selected_assets)<=available_assets:raise HTTPException(422,'配图选择不属于本题来源')
     if body.answer_status=='verified':
         if not body.reference_answer.strip():raise HTTPException(422,'已核对参考答案不能为空')
         # A teacher may transcribe an answer; unverified reference blocks must not be claimed verified.

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react"
 import { BookOpen, Check, FileCheck2, Files, GitBranch, ListTree, Loader2, MessageSquare, Package, Plus, RefreshCw, Upload } from "lucide-react"
 import PlanningPage from "./PlanningPage"
 import ResearchPage from "./ResearchManuscriptPage"
+import PaperResearchPage from "./PaperResearchPage"
 import KnowledgePage from "./EditorialKnowledgePage"
 import SourceReview from "./SourceReview"
 import SourceReviewFiles from "./SourceReviewFiles"
@@ -14,6 +15,7 @@ const stages = [
   { id: "planning", label: "内容规划", icon: ListTree },
   { id: "knowledge", label: "知识与关系", icon: BookOpen },
   { id: "research", label: "题目与研究", icon: BookOpen },
+  { id: "paper", label: "整卷研究", icon: BookOpen },
   { id: "tasks", label: "任务与生成", icon: GitBranch },
   { id: "editor", label: "编辑与评审", icon: MessageSquare },
   { id: "preview", label: "小册子预览", icon: BookOpen },
@@ -89,6 +91,7 @@ export default function App() {
   const [requestedKnowledgeUnit,setRequestedKnowledgeUnit]=useState("")
   const [planningDirty,setPlanningDirty]=useState(false)
   const [researchDirty,setResearchDirty]=useState(false)
+  const [paperDirty,setPaperDirty]=useState(false),[requestedResearchRun,setRequestedResearchRun]=useState("")
   const [knowledgeDirty, setKnowledgeDirty] = useState(false)
   const [requestedBlockId, setRequestedBlockId] = useState("")
   const [draftId, setDraftId] = useState("")
@@ -147,6 +150,7 @@ export default function App() {
   }
   function navigate(next: string) {
     if (stage === "planning" && planningDirty && next !== stage && !window.confirm("有未保存的规划修改，离开会丢弃。继续？")) return
+    if (stage === "paper" && paperDirty && next !== stage && !window.confirm("有未保存的整卷修改，离开将丢弃。继续？")) return
     if (stage === "research" && researchDirty && next !== stage && !window.confirm("有未保存的题目或研究修改，离开将丢弃。继续？")) return
     if (stage === "knowledge" && knowledgeDirty && next !== stage && !window.confirm("有未保存的知识修改，离开会丢弃。继续？")) return
     if (stage === "sources" && sourceDirty && next !== stage && !window.confirm("有未保存的核对修改，离开将丢弃这些修改。继续？")) return
@@ -162,7 +166,8 @@ export default function App() {
       <main><div className="intro"><div><p className="eyebrow">理解知识 · 发现连接 · 建立思路</p><h1>{({ materials: "从可信资料开始。", sources: "让每个条件都准确。", planning: "把知识组织成复习路径。", knowledge: "从知识草案到教师确认。", research:"从完整题目建立解题思路。", tasks: "把生成过程留在记录里。", editor: "让思路经得起检查。", preview: "回到学生的阅读视角。", releases: "交付一个确定的版本。" } as Record<string, string>)[stage]}</h1></div><Button variant="outline" size="sm" onClick={() => void refresh()}><RefreshCw />刷新列表</Button></div>
       {!online && <div className="notice" role="alert">尚未连接 API。请按 README 启动 FastAPI（8000）和 Worker；前端通过 Vite 代理访问。</div>}
       <Message value={message} />
-      {stage === "research" && <ResearchPage documents={documents} onDirtyChange={setResearchDirty} openKnowledge={()=>setStage("knowledge")} />}
+      {stage === "paper" && <PaperResearchPage onDirtyChange={setPaperDirty} onOpenRun={id=>{setRequestedResearchRun(id);setStage("research")}} />}
+      {stage === "research" && <ResearchPage initialRunId={requestedResearchRun} documents={documents} onDirtyChange={setResearchDirty} openKnowledge={()=>setStage("knowledge")} />}
       {stage === "knowledge" && <KnowledgePage onOpenResearch={()=>setStage("research")} initialUnitId={requestedKnowledgeUnit} onDirtyChange={setKnowledgeDirty} />}
       {stage === "materials" && <>
         <div className="upload-area"><Upload size={25} /><h2>加入你的资料包</h2><p className="muted">DOCX 或 PDF，单份不超过30MB。保留原件，不要求先整理教材版本。</p><div className="actions"><select aria-label="资料类别" value={category} onChange={e => setCategory(e.target.value)}>{Object.entries(categories).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select><label className={`upload-label ${busy ? "opacity-50" : ""}`}>选择文件<input aria-label="上传资料文件" type="file" accept=".docx,.pdf" multiple disabled={busy || !online} onChange={e => { void upload(e.target.files); e.target.value = "" }} /></label></div></div>

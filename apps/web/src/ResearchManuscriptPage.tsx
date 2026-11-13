@@ -11,7 +11,7 @@ type Reference={id:string;version_id:string;title:string;created_at:string;edges
 type Profiles={active:string;profiles:{id:string;label:string;model:string;ready:boolean}[]}
 const states:Record<string,string>={queued:'等待研究',running:'研究与模型复核中',completed:'研究工作稿',failed:'研究失败',interrupted:'研究中断'}
 
-export default function ResearchManuscriptPage({documents,onDirtyChange,openKnowledge}:{documents:Document[];onDirtyChange:(dirty:boolean)=>void;openKnowledge:()=>void}){
+export default function ResearchManuscriptPage({documents,onDirtyChange,openKnowledge,initialRunId=''}:{initialRunId?:string;documents:Document[];onDirtyChange:(dirty:boolean)=>void;openKnowledge:()=>void}){
  const [versions,setVersions]=useState<KnowledgeVersion[]>([]),[versionIds,setVersionIds]=useState<string[]>([]),[references,setReferences]=useState<Reference[]>([]),[referenceIds,setReferenceIds]=useState<string[]>([])
  const [profiles,setProfiles]=useState<Profiles|null>(null),[questions,setQuestions]=useState<Question[]>([]),[questionId,setQuestionId]=useState(''),[questionEditor,setQuestionEditor]=useState(false),[questionDirty,setQuestionDirty]=useState(false)
  const [records,setRecords]=useState<ResearchSummary[]>([]),[finals,setFinals]=useState<{id:string;output_id:string;revision:number;created_at:string}[]>([]),[task,setTask]=useState<ResearchRun|null>(null),[frozen,setFrozen]=useState<ResearchVersion|null>(null)
@@ -36,7 +36,7 @@ export default function ResearchManuscriptPage({documents,onDirtyChange,openKnow
  async function openRun(id:string){const serial=++requestSerial.current;const value=await api<ResearchRun>(`/research-editor/runs/${id}`);if(serial!==requestSerial.current)return;reset();setTask(value)}
  async function openFinal(id:string){const serial=++requestSerial.current;const value=await api<ResearchVersion>(`/research-editor/versions/${id}`);if(serial!==requestSerial.current)return;reset();setTask(null);setFrozen(value)}
  async function act(fn:()=>Promise<void>){setBusy(true);setMessage('');try{await fn()}catch(e){setMessage(String(e))}finally{setBusy(false)}}
- useEffect(()=>{let alive=true;void refresh().then(async({r})=>{if(alive&&!initialLoad.current){initialLoad.current=true;if(r.length)await openRun(r[0].id)}}).catch(e=>{if(alive)setMessage(String(e))});return()=>{alive=false}},[refresh])
+ useEffect(()=>{let alive=true;void refresh().then(async({r})=>{if(alive&&!initialLoad.current){initialLoad.current=true;if(initialRunId||r.length)await openRun(initialRunId||r[0].id)}}).catch(e=>{if(alive)setMessage(String(e))});return()=>{alive=false}},[refresh])
  useEffect(()=>{onDirtyChange(dirty);return()=>onDirtyChange(false)},[dirty,onDirtyChange])
  useEffect(()=>{const warn=(e:BeforeUnloadEvent)=>{if(dirty){e.preventDefault();e.returnValue=''}};window.addEventListener('beforeunload',warn);return()=>window.removeEventListener('beforeunload',warn)},[dirty])
  useEffect(()=>{let alive=true;setReferences([]);setReferenceIds([]);if(versionIds.length)void api<Reference[]>(`/research-editor/relation-references?version_ids=${versionIds.join(',')}`).then(list=>{if(alive)setReferences(list)}).catch(e=>{if(alive)setMessage(String(e))});return()=>{alive=false}},[versionIds.join(',')])

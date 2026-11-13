@@ -117,6 +117,7 @@ def get_manuscript(run_id:str):
 class Start(Strict):
     version_ids:list[str]=Field(min_length=1,max_length=5)
     question_version_id:str
+    knowledge_refs:list[str]|None=Field(default=None,max_length=80)
     relation_message_ids:list[str]=Field(default_factory=list,max_length=10)
     instruction:str=Field(default='',max_length=3000)
     limit:int=Field(default=2,ge=1,le=3)
@@ -132,7 +133,7 @@ def start_manuscript(body:Start):
         existing=c.execute('SELECT run_id FROM research_manuscripts WHERE request_key=?',(body.request_key,)).fetchone()
         if existing:
             old=row(c,'knowledge_runs',existing['run_id']);meta=json.loads(old['input_json'])['research_task'];ctx=row(c,'research_contexts',meta['context_id'])
-            if json.loads(ctx['version_ids'])!=body.version_ids or meta['question_version_id']!=body.question_version_id or meta['instruction']!=body.instruction or meta['limit']!=body.limit or meta.get('relation_message_ids',[])!=body.relation_message_ids:raise HTTPException(409,'请求编号对应的研究内容不同')
+            if json.loads(ctx['version_ids'])!=body.version_ids or meta['question_version_id']!=body.question_version_id or meta['instruction']!=body.instruction or meta['limit']!=body.limit or meta.get('relation_message_ids',[])!=body.relation_message_ids or meta.get('knowledge_refs')!=body.knowledge_refs:raise HTTPException(409,'请求编号对应的研究内容不同')
             return manuscript(c,old)
         if len(set(body.version_ids))!=len(body.version_ids) or len(set(body.relation_message_ids))!=len(body.relation_message_ids):raise HTTPException(422,'知识终稿或关系参考重复')
         items=[];inherited=[]
@@ -144,10 +145,16 @@ def start_manuscript(body:Start):
                 if item['scope']!='excluded':items.append({'ref':key+':'+item['knowledge_id'],'version_id':key,'knowledge_id':item['knowledge_id'],'title':item['body']['name'],'unit_title':snapshot['unit']['title'],'scope':item['scope'],'body':item['body']})
             for edge in snapshot.get('relations',[]):
                 inherited.append({'source_ref':key+':'+edge['body']['source_id'],'target_ref':key+':'+edge['body']['target_id'],**{k:v for k,v in edge['body'].items() if k not in {'source_id','target_id'}},'basis':'knowledge_version_teacher_review'})
+        if body.knowledge_refs is not None:
+            selected=set(body.knowledge_refs)
+            if len(selected)!=len(body.knowledge_refs) or not selected<={x['ref'] for x in items}:raise HTTPException(422,'知识选择重复或不属于所选终稿')
+            items=[x for x in items if x['ref'] in selected]
+            inherited=[x for x in inherited if x['source_ref'] in selected and x['target_ref'] in selected]
         if not items or len(items)>80 or len(packed(items))>120000:raise HTTPException(422,'请选择1—80项知识，正文不超过120000字符')
         possible={r['id']:r for r in relation_references(c,body.version_ids)}
         if not set(body.relation_message_ids)<=possible.keys():raise HTTPException(409,'所选关系与知识终稿不匹配，请重新选择')
         advisory=[r for key in body.relation_message_ids for r in possible[key]['edges']]
+        if body.knowledge_refs is not None:advisory=[x for x in advisory if x['source_ref'] in selected and x['target_ref'] in selected]
         if len(advisory)>80:raise HTTPException(422,'关系参考过多，请减少选择')
         question_version=row(c,'research_question_versions',body.question_version_id);question=row(c,'research_questions',question_version['question_id'])
         if question['revision']!=question_version['revision'] or question['confirmed_revision']!=question_version['revision'] or not question_current(c,question):raise HTTPException(409,'题目尚未完整确认或来源已变化')
@@ -156,7 +163,7 @@ def start_manuscript(body:Start):
         context_id=uid();title=frozen['title']+' · 研究依据'
         context={'items':items,'inherited_relations':inherited,'advisory_relations':advisory,'version_ids':body.version_ids,'official_coverage_verified':False}
         c.execute('INSERT INTO research_contexts(id,title,version_ids,snapshot,created_at) VALUES(?,?,?,?,?)',(context_id,title,packed(body.version_ids),packed(context),now()))
-        meta={'kind':'analysis','workflow':'manuscript-v1','context_id':context_id,'context_revision':1,'question_version_id':body.question_version_id,'graph_version_id':None,'instruction':body.instruction,'limit':body.limit,'relation_message_ids':body.relation_message_ids}
+        meta={'kind':'analysis','workflow':'manuscript-v1','context_id':context_id,'context_revision':1,'question_version_id':body.question_version_id,'graph_version_id':None,'instruction':body.instruction,'limit':body.limit,'relation_message_ids':body.relation_message_ids,'knowledge_refs':body.knowledge_refs}
         run_id=uid();unit_id=uid();snapshot={'schema_version':1,'prompt_version':'research-manuscript-v1','title':frozen['title'],'chapters':[],'research_task':meta}
         c.execute('INSERT INTO knowledge_units(id,title,chapters,target,notes,origin,created_at) VALUES(?,?,?,?,?,?,?)',(unit_id,frozen['title'],'[]','单题研究','',packed({'internal_research':True}),now()))
         c.execute('INSERT INTO knowledge_runs(id,unit_id,input_revision,input_json,model_json,status,stage,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)',(run_id,unit_id,1,packed(snapshot),packed(public_provider(config)),'queued','research',now(),now()))
@@ -222,6 +229,8 @@ def revise_version(version_id:str):
         c.execute('INSERT INTO knowledge_units(id,title,chapters,target,notes,origin,created_at) VALUES(?,?,?,?,?,?,?)',(unit_id,frozen['question']['title'],'[]','单题研究','',packed({'internal_research':True}),now()))
         c.execute("INSERT INTO knowledge_runs(id,unit_id,input_revision,input_json,model_json,status,stage,created_at,updated_at) VALUES(?,?,?,?,?,'completed','completed',?,?)",(run_id,unit_id,1,packed(snapshot),packed(frozen['model']),now(),now()))
         c.execute('INSERT INTO research_manuscripts(run_id,parent_version) VALUES(?,?)',(run_id,version_id))
+        c.execute('INSERT OR IGNORE INTO paper_item_runs(item_id,run_id) SELECT item_id,? FROM paper_item_runs WHERE run_id=?',(run_id,frozen['run_id']))
+        c.execute('UPDATE paper_items SET run_id=? WHERE run_id=?',(run_id,frozen['run_id']))
         c.execute("INSERT INTO research_outputs(id,run_id,context_id,kind,body,original_body,checks) VALUES(?,?,?,'analysis',?,?,?)",(uid(),run_id,meta['context_id'],packed(frozen['analysis']),packed(frozen['analysis']),packed(frozen['checks'])))
         return manuscript(c,row(c,'knowledge_runs',run_id))
 
