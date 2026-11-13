@@ -1,9 +1,23 @@
 """A whole-exam transcription review, distinct from mathematical solution review."""
-from pydantic import Field
+from pydantic import Field,model_validator
 from .research_models import Strict
-from .paper_models import Span,SplitItem
+from .paper_models import Span
 
-class ExamHint(SplitItem):
+class ExamHint(Strict):
+    # A question title is not used by assembly: its text is always sliced from original spans.
+    number:str=Field(default='',max_length=80)
+    question_spans:list[Span]=Field(min_length=1,max_length=30)
+    answer_spans:list[Span]=Field(default_factory=list,max_length=30)
+    asset_ids:list[str]=Field(default_factory=list,max_length=30)
+    boundary_note:str=Field(default='',max_length=2000)
+    @model_validator(mode='before')
+    @classmethod
+    def legacy_title(cls,value):
+        if isinstance(value,dict) and 'title' in value:
+            if not isinstance(value['title'],str):raise ValueError('旧格式单题标题必须是文字')
+            # Ignore only this obsolete metadata, never crop the stem or discard unknown fields.
+            return {k:v for k,v in value.items() if k!='title'}
+        return value
     answer_asset_ids:list[str]=Field(default_factory=list,max_length=30)
 class ExamPlan(Strict):
     title:str=Field(min_length=1,max_length=200)

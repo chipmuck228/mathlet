@@ -139,3 +139,55 @@ def test_fixed_image_bytes_survive_source_image_change_and_review_flags_are_not_
     f=json.loads(before);assert f['assets'][0]['data_url'].startswith('data:image/png;base64,')
     malformed=f|{'source':{'original_hash':f['source']['original_hash'],'blocks':[{'ordinal':0,'assets':[]}]}}
     assert client.post('/api/documents/'+doc+'/exam-extractions/import',json={'payload':malformed}).status_code==422
+
+
+def test_question_title_is_not_requested_and_long_legacy_title_never_truncates_original_question(client,monkeypatch):
+    from mathlet.exam_models import ExamPlan
+    assert 'title' not in ExamPlan.model_json_schema()['$defs']['ExamHint']['properties']
+    doc,_=ready(client,False);r=start(client,doc)
+    def long_title(*args):
+        raw,usage=model(*args);value=json.loads(raw)
+        for q in value['questions']:q['title']='这是一段被模型误当作标题的长题干'+r'\(x^2+\frac{1}{x}\)'*100
+        return json.dumps(value),usage
+    monkeypatch.setattr(worker,'generate',long_title);worker.run_one_knowledge();r=get(client,r)
+    assert r['status']=='completed',r['error']
+    assert r['payload']['questions'][0]['question_text']==TEXT.split('\n')[0]
+    assert r['payload']['questions'][0]['answer_text']=='1. 4。'
+
+
+def test_retry_recovers_historical_title_error_without_another_paid_call_even_at_budget_limit(client,monkeypatch):
+    from pydantic import create_model,Field
+    from mathlet.paper_models import SplitItem
+    from mathlet.research_models import Strict
+    from mathlet import exam_worker
+    OldHint=create_model('OldHint',__base__=SplitItem,answer_asset_ids=(list[str],Field(default_factory=list)))
+    OldPlan=create_model('ExamPlan',__base__=Strict,title=(str,...),questions=(list[OldHint],...),notes=(list[str],Field(default_factory=list)))
+    doc,_=ready(client,False);r=start(client,doc)
+    def response(*args):
+        raw,usage=model(*args);v=json.loads(raw);v['questions'][0]['title']='长题干'*200
+        return json.dumps(v),usage
+    with monkeypatch.context() as old:
+        old.setattr(exam_worker,'ExamPlan',OldPlan);old.setattr(worker,'generate',response);worker.run_one_knowledge()
+    r=get(client,r);assert r['status']=='failed' and 'questions.0.title' in r['error']
+    with connect() as c:
+        call=dict(c.execute('SELECT * FROM knowledge_calls WHERE run_id=?',(r['id'],)).fetchone())
+        frozen=json.loads(c.execute('SELECT model_json FROM knowledge_runs WHERE id=?',(r['id'],)).fetchone()[0]);frozen.update(max_calls=1,output_token_budget=10000)
+        c.execute('UPDATE knowledge_runs SET model_json=? WHERE id=?',(json.dumps(frozen),r['id']))
+    def forbidden(*_):raise AssertionError('历史响应可恢复，不应再次调用模型')
+    monkeypatch.setattr(worker,'generate',forbidden)
+    retry=client.post('/api/exam-extractions/'+r['id']+'/retry',json={'revision':r['run_revision']});assert retry.status_code==200,retry.text
+    worker.run_one_knowledge();r=get(client,r)
+    assert r['status']=='completed',r['error']
+    assert r['payload']['questions'][0]['question_text']==TEXT.split('\n')[0]
+    with connect() as c:
+        calls=c.execute('SELECT * FROM knowledge_calls WHERE run_id=?',(r['id'],)).fetchall()
+        assert len(calls)==1 and calls[0]['status']=='revalidated' and calls[0]['raw_response']==call['raw_response']
+
+
+def test_legacy_title_compatibility_does_not_accept_foreign_source_ids(client,monkeypatch):
+    doc,_=ready(client,False);r=start(client,doc)
+    def invalid(*args):
+        raw,usage=model(*args);v=json.loads(raw);v['questions'][0]['title']='长标题'*200;v['questions'][0]['question_spans'][0]['block_id']='foreign'
+        return json.dumps(v),usage
+    monkeypatch.setattr(worker,'generate',invalid);worker.run_one_knowledge();r=get(client,r)
+    assert r['status']=='failed' and not r['payload'] and '原文之外' in r['error']

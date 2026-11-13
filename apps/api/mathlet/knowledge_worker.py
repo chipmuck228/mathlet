@@ -1,5 +1,6 @@
 """Checkpointed, budgeted knowledge drafting. No tools or source-file access for models."""
 import json
+import re
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 from .db import connect, now, uid
@@ -67,12 +68,13 @@ def call(run, config, step, task, payload, max_tokens, validator, *, system_prom
         for attempt in previous:
             error=attempt['error']
             eligible=(step.startswith('details:') and error=='展开结果改变了清单的名称或类型，请重试') or error.startswith(('Invalid \\escape','Invalid \\uXXXX escape','[MODEL_JSON_ESCAPE]','[MODEL_JSON_FORMAT]'))
+            eligible=eligible or (step=='exam:structure' and 'ExamPlan' in error and 'string_too_long' in error and bool(re.search(r'questions\.\d+\.title',error)))
             if not eligible: continue
             try:
                 decoded,notes=parse_model_json(attempt['raw_response']);recovered=validator(decoded)
             except (ValueError,TypeError): continue
             c.execute("UPDATE knowledge_calls SET status='revalidated',error=?,updated_at=? WHERE id=?",
-                (f'历史响应重新校验通过，未新增模型调用；JSON数学转义规范化{len(notes)}处；原错误：'+error,now(),attempt['id']))
+                (f'历史响应按当前结构重新校验通过，未新增模型调用；JSON数学转义规范化{len(notes)}处；原错误：'+error,now(),attempt['id']))
             return recovered
         count,reserved=c.execute('SELECT count(*),coalesce(sum(reserved_tokens),0) FROM knowledge_calls WHERE run_id=?',(run['id'],)).fetchone()
         if count>=config.max_calls or reserved+max_tokens>config.output_token_budget:
