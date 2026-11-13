@@ -152,7 +152,11 @@ def arrange(run_id:str,body:Arrange):
         c.execute('UPDATE knowledge_runs SET revision=revision+1,updated_at=? WHERE id=?',(now(),run_id))
         return detail(c,row(c,'knowledge_runs',run_id))
 
-class Finalize(Rev): confirmed:bool
+from .knowledge_actions import Relation
+class Finalize(Rev):
+    confirmed:bool
+    relation_message_id:str|None=None
+    relations:list[Relation]|None=Field(default=None,max_length=12)
 @router.post('/runs/{run_id}/finalize',status_code=201)
 def finalize(run_id:str,body:Finalize):
     if not body.confirmed:raise HTTPException(422,'请确认整份清单的内容与适用范围')
@@ -164,14 +168,26 @@ def finalize(run_id:str,body:Finalize):
         if data['final_blockers']:raise HTTPException(422,'；'.join(data['final_blockers']))
         items=[x for x in data['items'] if x['id'] not in data['removed'] and x['scope']!='excluded']
         if not items:raise HTTPException(422,'至少保留一个纳入的知识条目')
+        reviewed_relations=[]
+        if (body.relation_message_id is None)!=(body.relations is None):raise HTTPException(422,'请同时提交关系生成记录与人工审定的关系列表')
+        if body.relation_message_id is not None:
+            message=row(c,'editorial_messages',body.relation_message_id);context=json.loads(message['payload'])
+            if message['run_id']!=run_id or message['action']!='relations' or message['status']!='completed' or context.get('source_version') or context['context_revision']!=run['revision']:raise HTTPException(409,'关系依据已变化或不属于当前稿件，请基于当前正文重新生成关系')
+            allowed={x['knowledge_id'] for x in items};seen=set()
+            from .research import validate_text
+            for edge in body.relations:
+                value=edge.model_dump();key=(edge.source_id,edge.target_id,edge.relation_type)
+                if edge.source_id not in allowed or edge.target_id not in allowed or edge.source_id==edge.target_id or key in seen:raise HTTPException(422,'关系端点不存在、指向自身或重复')
+                for text in [edge.reason,edge.conditions,edge.example]:validate_text(text)
+                seen.add(key);reviewed_relations.append({'id':uid(),'body':value,'teacher_verified':True,'source_message_id':body.relation_message_id,'reviewer':'本机教师整稿确认'})
         for item in items:
             old=row(c,'knowledge_candidates',item['id'])
             c.execute('INSERT INTO knowledge_candidate_history VALUES(?,?,?,?,?)',(uid(),item['id'],old['revision'],packed(old),now()))
             c.execute("UPDATE knowledge_candidates SET review_state='approved',reviewer='本机教师整稿确认',revision=revision+1 WHERE id=?",(item['id'],))
         c.execute('UPDATE knowledge_runs SET revision=revision+1,updated_at=? WHERE id=?',(now(),run_id));run=row(c,'knowledge_runs',run_id)
         ids={x['id'] for x in items};items=[candidate_json(row(c,'knowledge_candidates',x['id'])) for x in items]
-        snapshot={'schema_version':1,'unit':unit_json(c,row(c,'knowledge_units',run['unit_id'])),'model':json.loads(run['model_json']),'input':json.loads(run['input_json']),'run_id':run_id,'run_revision':run['revision'],'items':items,'reviewed_count':len(items),'selected_count':len(data['items']),'official_coverage_verified':False,'basis':'model_prior_and_teacher_review','checks':data['checks'],'relations':[],
-                  'editorial':{'whole_manuscript_confirmed':True,'parent_version':data['parent_version'],'removed_ids':[x['id'] for x in data['items'] if x['id'] not in ids],'ai_relations_included':False}}
+        snapshot={'schema_version':1,'unit':unit_json(c,row(c,'knowledge_units',run['unit_id'])),'model':json.loads(run['model_json']),'input':json.loads(run['input_json']),'run_id':run_id,'run_revision':run['revision'],'items':items,'reviewed_count':len(items),'selected_count':len(data['items']),'official_coverage_verified':False,'basis':'model_prior_and_teacher_review','checks':data['checks'],'relations':reviewed_relations,
+                  'editorial':{'whole_manuscript_confirmed':True,'parent_version':data['parent_version'],'removed_ids':[x['id'] for x in data['items'] if x['id'] not in ids],'ai_relations_included':body.relation_message_id is not None,'relations_teacher_confirmed':body.relation_message_id is not None,'relation_message_id':body.relation_message_id}}
         version_id=uid();c.execute('INSERT INTO knowledge_versions VALUES(?,?,?,?,?,?)',(version_id,run['unit_id'],run_id,run['revision'],packed(snapshot),now()))
         return {'id':version_id,'snapshot':snapshot}
 

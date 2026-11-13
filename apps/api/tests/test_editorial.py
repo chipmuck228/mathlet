@@ -185,3 +185,47 @@ def test_cross_unit_edits_and_foreign_proposals_are_rejected(client,monkeypatch)
     response=client.post(f"/api/editor/runs/{second['id']}/supplements",json={'revision':second['revision'],'selections':[{'message_id':proposal['id'],'index':0}]})
     assert response.status_code==422
     assert len(client.get(f"/api/editor/runs/{second['id']}").json()['items'])==2
+
+
+def section_relations(client,monkeypatch,run,key='section-relations-test'):
+    ids=[x['knowledge_id'] for x in run['items']]
+    edge={'source_id':ids[0],'target_id':ids[1],'relation_type':'uses','reason':'原始AI建议','conditions':'满足相应成立条件','example':'解释等式变形'}
+    monkeypatch.setattr(editorial,'generate',lambda *_:(json.dumps({'relations':[edge]}),None))
+    r=send(client,run,'relations',request_key=key);assert r.status_code==201,r.text
+    assert r.json()['status']=='completed',r.text
+    return r.json(),edge
+
+
+def test_section_final_freezes_teacher_edited_relations_and_preserves_original_suggestions(client,monkeypatch):
+    unit,run=prepared(client,monkeypatch);m,edge=section_relations(client,monkeypatch,run)
+    edited=edge|{'reason':'教师已核查：方法的使用必须满足性质条件'}
+    r=client.post(f"/api/editor/runs/{run['id']}/finalize",json={'revision':run['revision'],'confirmed':True,'relation_message_id':m['id'],'relations':[edited]})
+    assert r.status_code==201,r.text
+    f=r.json();assert f['snapshot']['editorial']['relations_teacher_confirmed']
+    assert f['snapshot']['relations'][0]['body']==edited and f['snapshot']['relations'][0]['teacher_verified']
+    messages=client.get(f"/api/editor/runs/{run['id']}/messages").json()
+    assert messages[-1]['result']['relations'][0]==edge
+    url=f"/api/knowledge/versions/{f['id']}/download";original=client.get(url).content
+    ctx=client.post('/api/research/contexts',json={'title':'小节终稿依据','version_ids':[f['id']]})
+    assert ctx.status_code==201,ctx.text
+    assert ctx.json()['snapshot']['inherited_relations'][0]['reason']==edited['reason']
+    fork=client.post(f"/api/editor/versions/{f['id']}/revise").json()
+    save(client,fork,body=fork['items'][0]['body']|{'positive_example':'教师修改了例子'})
+    assert client.get(url).content==original
+
+
+def test_section_final_rejects_stale_relation_context_and_bad_endpoints(client,monkeypatch):
+    _,run=prepared(client,monkeypatch);m,edge=section_relations(client,monkeypatch,run)
+    url=f"/api/editor/runs/{run['id']}/finalize";base={'revision':run['revision'],'confirmed':True,'relation_message_id':m['id']}
+    assert client.post(url,json=base).status_code==422
+    for edges in [[edge|{'target_id':'foreign'}],[edge|{'target_id':edge['source_id']}],[edge,edge]]:
+        r=client.post(url,json=base|{'relations':edges});assert r.status_code==422,r.text
+    changed=save(client,run,body=run['items'][0]['body']|{'positive_example':'换个例子'}).json()
+    response=client.post(url,json=base|{'revision':changed['revision'],'relations':[edge]})
+    assert response.status_code==409 and '关系依据已变化' in response.text
+    assert client.get(f"/api/knowledge/units/{run['unit_id']}/versions").json()==[]
+    m2,e2=section_relations(client,monkeypatch,changed,'section-new-relations')
+    # An empty AI list can be explicitly confirmed; absence of edges does not prove completeness.
+    response=client.post(url,json={'revision':changed['revision'],'confirmed':True,'relation_message_id':m2['id'],'relations':[]})
+    assert response.status_code==201,response.text
+    assert response.json()['snapshot']['relations']==[] and response.json()['snapshot']['editorial']['relations_teacher_confirmed']

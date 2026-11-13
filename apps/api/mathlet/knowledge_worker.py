@@ -146,7 +146,7 @@ def run_one_knowledge():
                 names=[x.name.strip().casefold() for x in parsed.items]
                 if len(set(names))!=len(names) or any(not n for n in names): raise ValueError('清单含重复或空白知识名称')
                 return parsed
-            result=call(run,config,'catalog','生成知识清单，先不要展开讲解。名称和reason使用中文及普通文本，不使用LaTeX或反斜杠命令；公式留到展开正文。返回 {"items":[{"name":"...","kind":"concept","reason":"为什么需要复习"}]}。严格不超过max_items，这是本批数量而非完整性标准；不要为凑数将概念、性质和方法合并成大条目。允许提示范围不确定的知识。',snapshot,1800,validate_catalog)
+            result=call(run,config,'catalog','生成知识清单，先不要展开讲解。按小节考虑必要的定义、概念、术语、性质、定理和方法；定义和术语可归为concept，公式及正反例留到正文展开。不要为了数量上限遗漏范围要求；无法覆盖时在reason说明缺口，不冒充完整。名称和reason使用中文及普通文本，不使用LaTeX或反斜杠命令；公式留到展开正文。返回 {"items":[{"name":"...","kind":"concept","reason":"为什么需要复习"}]}。严格不超过max_items，这是本批数量而非完整性标准；不要为凑数将概念、性质和方法合并成大条目。允许提示范围不确定的知识。',snapshot,1800,validate_catalog)
             catalog=[{'id':uid(),**item.model_dump()} for item in result.items]
             with connect() as c:
                 c.execute("UPDATE knowledge_runs SET catalog=?,status='awaiting_selection',stage='details',revision=revision+1,updated_at=? WHERE id=?",(packed(catalog),now(),run['id']))
