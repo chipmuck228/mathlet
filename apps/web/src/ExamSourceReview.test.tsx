@@ -73,3 +73,28 @@ it('toggles each question independently and keeps edits when returning to browse
  expect(sent.body.questions.map((x:typeof q)=>x.question_text)).toEqual(['第一题修订','第二题修订'])
  expect(sent.body.questions[0].answer_text).toBe('4')
 })
+it.each(['questions_only','legacy'])('allows confirmation after removing questions and saving a real-shaped %s response',async mode=>{
+ mock();const base=vi.mocked(api).getMockImplementation()!
+ const items=[{...q,answer_text:''},{...q,key:'q2',number:'2',answer_text:'',question_text:'第二题正文'},{...q,key:'q3',number:'3',answer_text:'',question_text:'第三题正文'}]
+ const initial=mode==='questions_only'?{content_mode:'questions_only',...payload,questions:items}:{...payload,questions:items}
+ vi.mocked(api).mockImplementation(async(path,init)=>{
+  if(path==='/exam-extractions/e'&&init?.method==='PUT'){
+   const sent=JSON.parse(init.body as string).body
+   // Pydantic serializes content_mode first, including the default for legacy drafts.
+   return {...record,revision:2,payload:{content_mode:mode==='legacy'?'with_answers':'questions_only',title:sent.title,questions:sent.questions,notes:sent.notes}}
+  }
+  if(path==='/exam-extractions/e'&&!init?.method)return {...record,payload:initial}
+  if(path.endsWith('/finalize'))return {...record,revision:2,payload:{...payload,questions:[items[0]]},read_only:true,versions:[]}
+  return base(path,init)
+ })
+ page();await screen.findByText('第三题正文')
+ await waitFor(()=>expect((screen.getByRole('button',{name:'编辑第2题'}) as HTMLButtonElement).disabled).toBe(false))
+ fireEvent.click(screen.getByRole('button',{name:'编辑第2题'}));fireEvent.click(screen.getByRole('button',{name:'移除此题'}))
+ fireEvent.click(screen.getByRole('button',{name:'编辑第3题'}));fireEvent.click(screen.getByRole('button',{name:'移除此题'}))
+ expect((screen.getByLabelText(/我已核对整份试卷/) as HTMLInputElement).disabled).toBe(true)
+ fireEvent.click(screen.getByRole('button',{name:'保存整份修改'}));await screen.findByText('已保存整份提取稿；尚未定稿。')
+ await waitFor(()=>expect((screen.getByLabelText(/我已核对整份试卷/) as HTMLInputElement).disabled).toBe(false))
+ expect(screen.queryByText('请先保存整份修改，再定稿。')).toBeNull()
+ fireEvent.click(screen.getByLabelText(/我已核对整份试卷/));fireEvent.click(screen.getByRole('button',{name:'定稿并生成原题提取文件'}))
+ await waitFor(()=>expect(vi.mocked(api).mock.calls.some(([p,i])=>p.endsWith('/finalize')&&JSON.parse(i!.body as string).revision===2)).toBe(true))
+})
