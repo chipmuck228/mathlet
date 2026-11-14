@@ -50,3 +50,14 @@ body{--keyboard-zindex:2100}
 .section-foundation{margin-top:24px;border-top:2px solid var(--border);padding-top:24px}.section-steps{display:flex;flex-wrap:wrap;gap:12px 24px;padding:0;list-style:none;margin:18px 0}.section-steps li{padding:8px 0;border-bottom:2px solid #c6d1be;font-size:13px}.section-foundation .manuscript-page{margin-top:12px}
 
 .exam-body{border:0;padding:0;min-width:0}.exam-question-index{display:flex;flex-wrap:wrap;gap:8px;position:sticky;top:0;background:var(--background,#fffdf8);padding:10px 0;z-index:2}.exam-question-index button{border:1px solid var(--border,#ccd2c7);padding:4px 12px}.exam-question{scroll-margin-top:50px}.exam-question h4{font-size:13px;color:#70806c;margin:20px 0 10px}.exam-gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:16px;max-height:60vh;overflow:auto;padding:10px}.exam-gallery-image{border:1px solid var(--border,#ddd);padding:12px;display:grid;gap:6px}.exam-gallery-image img{width:100%;max-height:180px;object-fit:contain}.exam-gallery-image span{font-size:12px;word-break:break-all}.exam-gallery-dialog{max-width:1000px;width:95vw}
+
+/* Extraction warnings stay visible in both reading and editing modes. */
+.exam-question.has-extraction-warning,.exam-question:has(.reading-formula-error){background:#fff8e8;border:1px solid #e4bd73;border-left:4px solid #b76b12;padding:14px 12px;margin:10px 0}
+.exam-question.has-extraction-warning.is-active,.exam-question.is-active:has(.reading-formula-error){box-shadow:inset 2px 0 #b76b12}
+.exam-warning-badge{display:inline-block;font-size:11px;font-weight:600;padding:2px 7px;border-radius:3px;background:#f6dfae;color:#75400b;vertical-align:middle}
+.exam-extraction-warning{color:#75400b;background:#fff0cd;border:1px solid #e4bd73;padding:10px 12px;margin:12px 0;font-size:13px;overflow-wrap:anywhere}
+.exam-extraction-warning p{margin-top:5px}
+.exam-question-index button.has-extraction-warning{border-color:#b76b12;background:#fff0cd;color:#75400b;font-weight:600}
+.review-column-title .exam-warning-count{color:#87480d;font-weight:600}
+.extraction-marker,.reading-formula-error{color:#75400b;background:#ffe3a6;padding:2px 4px;border-radius:2px;box-decoration-break:clone;-webkit-box-decoration-break:clone;print-color-adjust:exact}
+.reading-formula-error{border-bottom:2px dotted #b76b12}

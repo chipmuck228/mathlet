@@ -109,3 +109,27 @@ it('keeps unresolved-location questions editable beside successfully extracted q
  expect(screen.queryByText(note)).toBeNull()
  expect((screen.getByRole('button',{name:'保存整份修改'}) as HTMLButtonElement).disabled).toBe(false)
 })
+it('highlights formula placeholders and clears the warning after the teacher repairs the text',async()=>{
+ mock();const base=vi.mocked(api).getMockImplementation()!
+ const text='求值：【未转换公式，请对照原件并替换】。'
+ vi.mocked(api).mockImplementation(async(path,init)=>path==='/exam-extractions/e'&&!init?.method?{...record,payload:{...payload,questions:[{...q,question_text:text},{...q,key:'q2',number:'2',question_text:'正常题目'}]}}:base(path,init))
+ page();await screen.findByText('【未转换公式，请对照原件并替换】')
+ const marker=screen.getByText('【未转换公式，请对照原件并替换】');expect(marker.tagName).toBe('MARK')
+ expect(marker.closest('article')?.classList.contains('has-extraction-warning')).toBe(true)
+ expect(screen.getByText('正常题目').closest('article')?.classList.contains('has-extraction-warning')).toBe(false)
+ expect(screen.getByRole('button',{name:'第 1 题，存在提取异常'}).classList.contains('has-extraction-warning')).toBe(true)
+ expect(screen.getByText(/1 道题有提取异常/)).toBeTruthy()
+ fireEvent.click(screen.getByRole('button',{name:'编辑第1题'}))
+ expect(screen.getByText('提取异常，请对照原文核对')).toBeTruthy()
+ fireEvent.change(screen.getByLabelText('第1题题目'),{target:{value:'教师已恢复完整公式'}})
+ expect(screen.queryByText('提取异常，请对照原文核对')).toBeNull()
+ expect(screen.queryByRole('button',{name:'第 1 题，存在提取异常'})).toBeNull()
+ expect((screen.getByRole('button',{name:'保存整份修改'}) as HTMLButtonElement).disabled).toBe(false)
+})
+it('warns for unresolved superscripts, missing images and source boundary issues',async()=>{
+ mock();const base=vi.mocked(api).getMockImplementation()!
+ vi.mocked(api).mockImplementation(async(path,init)=>path==='/exam-extractions/e'&&!init?.method?{...record,payload:{...payload,questions:[{...q,question_text:'x【superscript：2，请合并核对】',image_ids:['missing.png'],notes:'题干续页边界不明确'}]}}:base(path,init))
+ page();await screen.findByText('含尚未合并的上下标，请核对公式结构。')
+ expect(screen.getByText('所选题图丢失或不可读取，请重新选择配图。')).toBeTruthy()
+ expect(screen.getByText('提取提示：题干续页边界不明确')).toBeTruthy()
+})

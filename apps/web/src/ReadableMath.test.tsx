@@ -24,4 +24,13 @@ it("preserves source with an explicit warning on unsupported syntax",async()=>{
  await waitFor(()=>expect(screen.getByText(/公式暂无法显示/)).toBeTruthy())
  expect(screen.getByText(String.raw`\unknown{x}`)).toBeTruthy()
  expect(screen.getByText(/暂不支持的公式命令：unknown/)).toBeTruthy()
+ expect(screen.getByRole("alert").classList.contains("reading-formula-error")).toBe(true)
+})
+it('highlights extraction markers only when requested and preserves literal source text',()=>{
+ const text='条件 <script>bad</script>【未转换公式，请对照原件并替换】'
+ const {container,rerender}=render(<ReadableMath text={text} highlightExtractionWarnings/>)
+ expect(container.querySelector('mark.extraction-marker')?.textContent).toBe('【未转换公式，请对照原件并替换】')
+ expect(container.textContent).toBe(text);expect(container.querySelector('script')).toBeNull()
+ rerender(<ReadableMath text={text}/>)
+ expect(container.querySelector('mark')).toBeNull()
 })
