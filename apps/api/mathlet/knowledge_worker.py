@@ -125,6 +125,10 @@ def run_one_knowledge():
             raise ValueError('模型服务配置与任务快照不同；恢复原配置后重试，或创建新候选批次')
         config=config.model_copy(update={k:frozen[k] for k in ['timeout','max_calls','output_token_budget']})
         snapshot=json.loads(run['input_json']);catalog=json.loads(run['catalog'])
+        if snapshot.get('formula_task'):
+            from .exam_formulas import run_formula
+            run_formula(run,config,snapshot)
+            return True
         if snapshot.get('exam_task'):
             from .exam_worker import run_exam
             run_exam(run,config,snapshot)

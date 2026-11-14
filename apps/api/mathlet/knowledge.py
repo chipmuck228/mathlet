@@ -32,6 +32,9 @@ def current(c, run):
     unit=row(c,'knowledge_units',run['unit_id'])
     if unit['revision']!=run['input_revision'] or origin_stale(c,unit): return False
     snapshot=json.loads(run['input_json'])
+    if snapshot.get('formula_task'):
+        from .exam_formulas import formula_current
+        return formula_current(c,snapshot['formula_task'])
     if snapshot.get('exam_task'):
         from .exam_extraction import exam_task_current
         return exam_task_current(c,snapshot['exam_task'])
