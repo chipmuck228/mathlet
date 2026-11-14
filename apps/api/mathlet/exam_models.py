@@ -1,4 +1,5 @@
 """A whole-exam transcription review, distinct from mathematical solution review."""
+from typing import Literal
 from pydantic import Field,model_validator
 from .research_models import Strict
 from .paper_models import Span
@@ -7,18 +8,16 @@ class ExamHint(Strict):
     # A question title is not used by assembly: its text is always sliced from original spans.
     number:str=Field(default='',max_length=80)
     question_spans:list[Span]=Field(min_length=1,max_length=30)
-    answer_spans:list[Span]=Field(default_factory=list,max_length=30)
     asset_ids:list[str]=Field(default_factory=list,max_length=30)
     boundary_note:str=Field(default='',max_length=2000)
     @model_validator(mode='before')
     @classmethod
     def legacy_title(cls,value):
-        if isinstance(value,dict) and 'title' in value:
-            if not isinstance(value['title'],str):raise ValueError('旧格式单题标题必须是文字')
-            # Ignore only this obsolete metadata, never crop the stem or discard unknown fields.
-            return {k:v for k,v in value.items() if k!='title'}
+        if isinstance(value,dict):
+            if 'title' in value and not isinstance(value['title'],str):raise ValueError('旧格式单题标题必须是文字')
+            # Old response metadata and answer locations are unused in question-only extraction.
+            return {k:v for k,v in value.items() if k not in {'title','answer_spans','answer_asset_ids'}}
         return value
-    answer_asset_ids:list[str]=Field(default_factory=list,max_length=30)
 class ExamPlan(Strict):
     title:str=Field(min_length=1,max_length=200)
     questions:list[ExamHint]=Field(min_length=1,max_length=60)
@@ -35,6 +34,7 @@ class ExamQuestion(Strict):
     answer_spans:list[Span]=Field(default_factory=list,max_length=30)
     notes:str=Field(default='',max_length=3000)
 class ExamBody(Strict):
+    content_mode:Literal['questions_only','with_answers']='with_answers'
     title:str=Field(min_length=1,max_length=200)
     questions:list[ExamQuestion]=Field(min_length=1,max_length=60)
     notes:str=Field(default='',max_length=8000)

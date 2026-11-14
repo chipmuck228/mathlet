@@ -17,17 +17,17 @@ function mock(existing=true){vi.mocked(api).mockImplementation(async path=>{
  throw Error('Unexpected '+path)
 })}
 function page(){render(<ExamSourceReview documentId="d" kind="docx" onDirtyChange={vi.fn()} onBusyChange={vi.fn()} onReviewSaved={vi.fn()}/>)}
-it('reads whole questions and original answers without block check buttons or model calls',async()=>{
+it('reads question-only review without answer or provenance widgets or model calls',async()=>{
  mock();page();await screen.findByText('已知x=2，求x的平方。')
- expect(screen.getByText('原文解答')).toBeTruthy();expect(screen.queryByRole('button',{name:'已核对'})).toBeNull()
+ expect(screen.queryByText('原文解答')).toBeNull();expect(screen.queryByText('原文定位与补充说明')).toBeNull();expect(screen.queryByText('整卷核对说明')).toBeNull();expect(screen.queryByRole('button',{name:'已核对'})).toBeNull()
  expect(screen.getByText('原文只读对照')).toBeTruthy()
  expect(vi.mocked(api).mock.calls.every(([,i])=>!i?.method)).toBe(true)
 })
 it('edits the complete question and chooses a replacement from all original images then saves the whole paper',async()=>{
  mock();const base=vi.mocked(api).getMockImplementation()!
  vi.mocked(api).mockImplementation(async(path,init)=>path==='/exam-extractions/e'&&init?.method==='PUT'?{...record,revision:2,payload:JSON.parse(init.body as string).body}:base(path,init))
- page();await screen.findByText('已知x=2，求x的平方。');await waitFor(()=>expect((screen.getByRole('button',{name:'编辑整份提取稿'}) as HTMLButtonElement).disabled).toBe(false))
- fireEvent.click(screen.getByRole('button',{name:'编辑整份提取稿'}));fireEvent.change(screen.getByLabelText('第1题题目'),{target:{value:'教师核对后的完整题目'}})
+ page();await screen.findByText('已知x=2，求x的平方。');await waitFor(()=>expect((screen.getByRole('button',{name:'编辑第1题'}) as HTMLButtonElement).disabled).toBe(false))
+ fireEvent.click(screen.getByRole('button',{name:'编辑第1题'}));fireEvent.change(screen.getByLabelText('第1题题目'),{target:{value:'教师核对后的完整题目'}})
  fireEvent.click(screen.getByRole('button',{name:'从全部图片选择／替换题图'}));await screen.findByRole('dialog',{name:'从原文全部图片选择'})
  fireEvent.click(screen.getByLabelText('选择图片 one.png b'));fireEvent.click(screen.getByLabelText('选择图片 two.png b'));fireEvent.click(screen.getByRole('button',{name:'应用图片选择'}))
  fireEvent.click(screen.getByRole('button',{name:'保存整份修改'}))
@@ -44,7 +44,7 @@ it('finalizes the whole transcription once and shows readonly download and expli
  await waitFor(()=>expect((screen.getByLabelText(/我已核对整份试卷/) as HTMLInputElement).disabled).toBe(false))
  fireEvent.click(screen.getByLabelText(/我已核对整份试卷/));fireEvent.click(button)
  await screen.findByRole('button',{name:'基于终稿继续修订'})
- expect(screen.queryByRole('button',{name:'编辑整份提取稿'})).toBeNull()
+ expect(screen.queryByRole('button',{name:'编辑第1题'})).toBeNull()
  const link=screen.getByRole('link',{name:'下载核对完成的原题提取文件'});expect(link.getAttribute('href')).toBe('/api/exam-extraction-versions/v/download')
  await waitFor(()=>expect(screen.getByAltText('第1题配图').getAttribute('src')).toBe('data:image/png;base64,c25hcHNob3Q='))
 })
@@ -54,4 +54,22 @@ it('starts AI extraction without a prior block-review workflow',async()=>{
  page();const button=await screen.findByRole('button',{name:'AI提取整份试卷'});await waitFor(()=>expect((button as HTMLButtonElement).disabled).toBe(false));fireEvent.click(button)
  await waitFor(()=>expect(vi.mocked(api).mock.calls.some(([p,i])=>p==='/exam-extractions'&&i?.method==='POST')).toBe(true))
  expect(vi.mocked(api).mock.calls.some(([p])=>p.includes('/source-review'))).toBe(false)
+})
+it('toggles each question independently and keeps edits when returning to browse',async()=>{
+ mock();const base=vi.mocked(api).getMockImplementation()!
+ vi.mocked(api).mockImplementation(async(path,init)=>path==='/exam-extractions/e'&&!init?.method?{...record,payload:{...payload,questions:[q,{...q,key:'q2',number:'2',question_text:'第二题正文'}]}}:path==='/exam-extractions/e'&&init?.method==='PUT'?{...record,revision:2,payload:JSON.parse(init.body as string).body}:base(path,init))
+ page();await screen.findByText('第二题正文')
+ fireEvent.click(screen.getByRole('button',{name:'编辑第1题'}))
+ fireEvent.change(screen.getByLabelText('第1题题目'),{target:{value:'第一题修订'}})
+ expect(screen.queryByLabelText('第2题题目')).toBeNull()
+ fireEvent.click(screen.getByRole('button',{name:'浏览第1题'}))
+ expect(screen.getByText('第一题修订')).toBeTruthy()
+ fireEvent.click(screen.getByRole('button',{name:'编辑第2题'}))
+ expect(screen.queryByLabelText('第1题题目')).toBeNull()
+ fireEvent.change(screen.getByLabelText('第2题题目'),{target:{value:'第二题修订'}})
+ fireEvent.click(screen.getByRole('button',{name:'保存整份修改'}))
+ await waitFor(()=>expect(vi.mocked(api).mock.calls.some(([,i])=>i?.method==='PUT')).toBe(true))
+ const sent=JSON.parse(vi.mocked(api).mock.calls.find(([,i])=>i?.method==='PUT')![1]!.body as string)
+ expect(sent.body.questions.map((x:typeof q)=>x.question_text)).toEqual(['第一题修订','第二题修订'])
+ expect(sent.body.questions[0].answer_text).toBe('4')
 })

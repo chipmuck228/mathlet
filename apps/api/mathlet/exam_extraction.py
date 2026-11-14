@@ -47,6 +47,7 @@ def validate_body(body,source,final=False):
     for q in value['questions']:
         if q['key'] in keys:raise HTTPException(422,'题目内部编号重复，请重新添加题目')
         keys.add(q['key'])
+        if value['content_mode']=='questions_only' and (q['answer_text'] or q['answer_spans'] or q['answer_image_ids']):raise HTTPException(422,'本提取稿仅包含题目，不能添加答案字段内容')
         if not set(q['image_ids']+q['answer_image_ids'])<=assets:raise HTTPException(422,'选择的图片不属于本份原文')
         if any(s['block_id'] not in blocks for s in q['question_spans']+q['answer_spans']):raise HTTPException(422,'题目原文定位不属于此文件')
         if final and not q['question_text'].strip():raise HTTPException(422,'请补全题目文字或移除空题后定稿')
@@ -155,7 +156,7 @@ def publish_questions(c,r,value,assets,version_id):
             frozen=json.loads(packed(payload))
             for a in frozen['assets']:
                 original=next(x for x in assets if x['name']==a['name']);a['data_url']=original['data_url']
-            frozen.update(question_id=qid,revision=current['revision'],reviewer='本机教师整卷核对',review_note='核对题干、配图和原文解答转录；未核验答案数学正确性',extraction_version_id=version_id)
+            frozen.update(question_id=qid,revision=current['revision'],reviewer='本机教师整卷核对',review_note='核对题干、配图与完整性；本次仅提取题目' if value['content_mode']=='questions_only' else '核对题干、配图和原文解答转录；未核验答案数学正确性',extraction_version_id=version_id)
             c.execute("UPDATE research_questions SET confirmed_revision=revision,reviewer='本机教师整卷核对',review_note=? WHERE id=?",(frozen['review_note'],qid))
             c.execute('INSERT OR IGNORE INTO research_question_versions(id,question_id,revision,snapshot,created_at) VALUES(?,?,?,?,?)',(uid(),qid,current['revision'],packed(frozen),now()))
         qjson=question_json(c,row(c,'research_questions',qid))
@@ -181,7 +182,7 @@ def materialize(v):
 class Final(Rev):confirmed:bool
 @router.post('/exam-extractions/{extraction_id}/finalize',status_code=201)
 def finalize(extraction_id:str,body:Final):
-    if not body.confirmed:raise HTTPException(422,'请确认整份试卷的标题、完整题目、原文解答与配图已核对')
+    if not body.confirmed:raise HTTPException(422,'请确认整份试卷的标题、完整题目与配图已核对')
     with connect() as c:
         c.execute('BEGIN IMMEDIATE');r=row(c,'exam_extractions',extraction_id);revision(r,body.revision);d=detail(c,r)
         if d['stale'] or d['status']!='completed' or not d['payload']:raise HTTPException(409,'来源已变化或尚无完整提取稿')
@@ -190,10 +191,11 @@ def finalize(extraction_id:str,body:Final):
         else:
             value=validate_body(d['payload'],d['source'],True);key=uid();ids=[a for q in value['questions'] for a in q['image_ids']+q['answer_image_ids']];assets=freeze_assets(d['source'],ids)
             questions=publish_questions(c,r,value,assets,key)
+            if value['content_mode']=='questions_only':questions=[{k:v for k,v in q.items() if k not in {'answer_text','answer_spans','answer_image_ids'}} for q in questions]
             number=c.execute('SELECT COALESCE(MAX(version_number),0)+1 FROM exam_extraction_versions WHERE extraction_id=?',(extraction_id,)).fetchone()[0]
             if not source_current(c,r):raise HTTPException(409,'原文在定稿期间发生变化，请重新提取')
             filename=r['filename'][:-5]+'-V'+str(number)+'.json'
-            snapshot={'format':'mathlet-exam-extraction','schema_version':1,'title':value['title'],'questions':questions,'notes':value['notes'],'assets':assets,'source':d['source'],'extraction_id':extraction_id,'extraction_revision':r['revision'],'version_id':key,'version_number':number,'filename':filename,'teacher_confirmed_transcription':True,'answer_math_verified':False,'created_at':now(),'parent_version':r['parent_version']}
+            snapshot={'format':'mathlet-exam-extraction','schema_version':1,'content_mode':value['content_mode'],'title':value['title'],'questions':questions,'notes':value['notes'],'assets':assets,'source':d['source'],'extraction_id':extraction_id,'extraction_revision':r['revision'],'version_id':key,'version_number':number,'filename':filename,'teacher_confirmed_transcription':True,'answer_math_verified':False,'created_at':now(),'parent_version':r['parent_version']}
             c.execute('INSERT INTO exam_extraction_versions VALUES(?,?,?,?,?,?,?)',(key,extraction_id,r['revision'],number,packed(snapshot),filename,now()))
             c.execute('INSERT INTO exam_document_heads VALUES(?,?) ON CONFLICT(document_id) DO UPDATE SET version_id=excluded.version_id',(r['document_id'],key))
             v=row(c,'exam_extraction_versions',key)
@@ -231,7 +233,7 @@ def import_file(document_id:str,body:ImportFile):
     if len(packed(payload))>50*1024*1024:raise HTTPException(422,'提取文件超过50MB')
     if payload.get('format')!='mathlet-exam-extraction' or payload.get('schema_version')!=1:raise HTTPException(422,'这不是整题提取文件；旧逐块核对文件请使用历史兼容入口')
     try:
-        incoming=ExamBody.model_validate({'title':payload.get('title',''),'questions':[{k:q[k] for k in ExamQuestion.model_fields if k in q} for q in payload.get('questions',[])],'notes':payload.get('notes','')})
+        incoming=ExamBody.model_validate({'content_mode':payload.get('content_mode','with_answers'),'title':payload.get('title',''),'questions':[{k:q[k] for k in ExamQuestion.model_fields if k in q} for q in payload.get('questions',[])],'notes':payload.get('notes','')})
         old_blocks=payload['source']['blocks']
         if not isinstance(old_blocks,list) or any(not isinstance(b,dict) or not isinstance(b.get('id'),str) or not isinstance(b.get('ordinal'),int) or not isinstance(b.get('assets'),list) or any(not isinstance(a,dict) or not isinstance(a.get('id'),str) for a in b.get('assets',[])) for b in old_blocks):raise ValueError('来源结构无效')
     except (ValueError,TypeError,KeyError) as exc:raise HTTPException(422,'提取文件结构无效：'+str(exc)) from None
@@ -257,7 +259,7 @@ def import_file(document_id:str,body:ImportFile):
                 clean[k]=[assetmap[x] for x in clean.get(k,[])]
             for k in ['question_spans','answer_spans']:clean[k]=[s|{'block_id':blockmap[s['block_id']]} for s in clean.get(k,[]) if s['block_id'] in blockmap]
             questions.append(clean)
-        try:value=validate_body({'title':payload.get('title',''),'questions':questions,'notes':payload.get('notes','')},source)
+        try:value=validate_body({'content_mode':payload.get('content_mode','with_answers'),'title':payload.get('title',''),'questions':questions,'notes':payload.get('notes','')},source)
         except ValueError as exc:raise HTTPException(422,str(exc)) from None
         # External edits can never import a teacher-approved flag or overwrite a local final.
         r=new_record(c,document_id,payload=value)
@@ -268,7 +270,7 @@ def fork_version(version_id:str):
     with connect() as c:
         c.execute('BEGIN IMMEDIATE');v=row(c,'exam_extraction_versions',version_id);r=row(c,'exam_extractions',v['extraction_id'])
         if not source_current(c,r):raise HTTPException(409,'原文已变化，旧终稿保留；请从当前原文重新提取')
-        frozen=json.loads(v['snapshot']);value={'title':frozen['title'],'questions':[{k:q[k] for k in ExamQuestion.model_fields if k in q} for q in frozen['questions']],'notes':frozen['notes']}
+        frozen=json.loads(v['snapshot']);value={'content_mode':frozen.get('content_mode','with_answers'),'title':frozen['title'],'questions':[{k:q[k] for k in ExamQuestion.model_fields if k in q} for q in frozen['questions']],'notes':frozen['notes']}
         new=new_record(c,r['document_id'],payload=value)
         c.execute('UPDATE exam_extractions SET parent_version=? WHERE id=?',(version_id,new['id']))
         return detail(c,row(c,'exam_extractions',new['id']))
@@ -292,8 +294,8 @@ def open_paper(version_id:str):
         c.execute('INSERT INTO paper_projects(id,document_id,title,source,knowledge,notes,created_at) VALUES(?,?,?,?,?,?,?)',(project,source['document_id'],f['title'],packed(source),packed(knowledge_pool(c)),packed(['已按完整题目核对定稿，直接进入知识推荐与研究，无需再逐块核对或分题。']),now()))
         for ordinal,q in enumerate(f['questions']):
             spans=q['question_spans'] or [{'block_id':source['blocks'][0]['id']}]
-            has_answer=bool(q['answer_text'].strip() or q['answer_image_ids'])
-            body=PaperItem(title=(f['title']+' · '+(q['number'] or str(ordinal+1)))[:160],number=q['number'],question_spans=spans,answer_spans=q['answer_spans'] if has_answer else [],asset_ids=q['image_ids'],answer_status='unchecked' if has_answer else 'absent',figure_status='described' if q['diagram_description'].strip() else 'pending' if q['image_ids'] else 'not_needed',diagram_description=q['diagram_description'],boundary_note=q['notes'],statement_override=q['question_text'],answer_override=q['answer_text']).model_dump()
+            has_answer=bool(q.get('answer_text','').strip() or q.get('answer_image_ids',[]))
+            body=PaperItem(title=(f['title']+' · '+(q['number'] or str(ordinal+1)))[:160],number=q['number'],question_spans=spans,answer_spans=q.get('answer_spans',[]) if has_answer else [],asset_ids=q['image_ids'],answer_status='unchecked' if has_answer else 'absent',figure_status='described' if q['diagram_description'].strip() else 'pending' if q['image_ids'] else 'not_needed',diagram_description=q['diagram_description'],boundary_note=q['notes'],statement_override=q['question_text'],answer_override=q.get('answer_text','')).model_dump()
             c.execute('INSERT INTO paper_items(id,project_id,ordinal,payload,original_payload,question_id,question_version_id) VALUES(?,?,?,?,?,?,?)',(uid(),project,ordinal,packed(body),packed(body),q.get('research_question_id'),q.get('question_version_id')))
         c.execute('INSERT INTO exam_extraction_papers VALUES(?,?)',(version_id,project))
         return project_json(c,row(c,'paper_projects',project))

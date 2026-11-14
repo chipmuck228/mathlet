@@ -33,9 +33,15 @@ def start(client,doc):
 def get(client,r):return client.get('/api/exam-extractions/'+r['id']).json()
 def save(client,r,body):return client.put('/api/exam-extractions/'+r['id'],json={'revision':r['revision'],'body':body})
 def final(client,r):return client.post('/api/exam-extractions/'+r['id']+'/finalize',json={'revision':r['revision'],'confirmed':True})
-def complete(client,monkeypatch,images=True):
+def complete(client,monkeypatch,images=True,legacy=False):
     doc,blocks=ready(client,images);r=start(client,doc);monkeypatch.setattr(worker,'generate',model);assert worker.run_one_knowledge();r=get(client,r)
     assert r['status']=='completed',r['error']
+    if legacy:
+        # Simulate a pre-upgrade saved manuscript; historical answer data must remain intact.
+        body=r['payload'];body.pop('content_mode',None);body['questions'][0]['answer_text']='1. 4。'
+        body['questions'][0]['answer_spans']=[{'block_id':blocks[2]['id'],'start_anchor':'1.','end_anchor':'4。','start_occurrence':0,'end_occurrence':0}]
+        with connect() as c:c.execute('UPDATE exam_extractions SET payload=? WHERE id=?',(json.dumps(body,ensure_ascii=False),r['id']))
+        r=get(client,r)
     return r,doc,blocks
 
 
@@ -43,13 +49,14 @@ def test_whole_exam_extract_edit_images_finalize_and_readonly_without_block_revi
     r,doc,blocks=complete(client,monkeypatch)
     assert r['payload']['title']==TITLE
     assert r['payload']['questions'][0]['question_text']==TEXT.split('\n')[0]
-    assert r['payload']['questions'][0]['answer_text']=='1. 4。'
+    assert r['payload']['questions'][0]['answer_text']==''
+    assert r['payload']['content_mode']=='questions_only'
     assert not r['payload']['questions'][1]['answer_text']
     assert client.get('/api/research/questions').json()==[]
     assert client.get('/api/source-reviews').json()==[]
     assert not any(b['verified'] for b in client.get('/api/documents/'+doc+'/blocks').json())
     body=r['payload'];body['questions'][0]['question_text']+=' 请写出过程。'
-    assets=r['source']['blocks'][1]['assets'];body['questions'][1]['image_ids']=[assets[1]['id']];body['questions'][0]['answer_image_ids']=[assets[0]['id']]
+    assets=r['source']['blocks'][1]['assets'];body['questions'][1]['image_ids']=[assets[1]['id']]
     changed=save(client,r,body);assert changed.status_code==200,changed.text
     changed=changed.json();assert changed['filename']==r['filename']
     assert save(client,r,body).status_code==409
@@ -60,7 +67,9 @@ def test_whole_exam_extract_edit_images_finalize_and_readonly_without_block_revi
     assert f['questions'][0]['question_text'].endswith('请写出过程。')
     assert f['questions'][1]['image_ids']==[assets[1]['id']] and not f['questions'][1]['research_ready']
     assert f['questions'][0]['research_ready'] and f['questions'][0]['question_version_id']
-    assert len(f['assets'])==2 and all(a['data_url'].startswith('data:image/png;base64,') for a in f['assets'])
+    assert 'answer_text' not in f['questions'][0] and 'answer_spans' not in f['questions'][0]
+    assert f['content_mode']=='questions_only'
+    assert len(f['assets'])==1 and all(a['data_url'].startswith('data:image/png;base64,') for a in f['assets'])
     assert (data_dir()/'exam-extractions'/version['filename']).read_bytes()==original
     assert save(client,fixed,body).status_code==409
     assert final(client,fixed).json()['versions'][0]['id']==version['id']
@@ -92,7 +101,7 @@ def test_transcription_final_does_not_gate_on_formula_commands_or_claim_math_ans
 
 
 def test_import_exact_file_is_readonly_but_external_changes_become_new_draft(client,monkeypatch):
-    r,doc,_=complete(client,monkeypatch,False);r=final(client,r).json();vid=r['versions'][0]['id'];f=client.get('/api/exam-extraction-versions/'+vid).json()['snapshot']
+    r,doc,_=complete(client,monkeypatch,False,legacy=True);r=final(client,r).json();vid=r['versions'][0]['id'];f=client.get('/api/exam-extraction-versions/'+vid).json()['snapshot']
     opened=client.post('/api/documents/'+doc+'/exam-extractions/import',json={'payload':f});assert opened.status_code==201,opened.text
     assert opened.json()['view_version_id']==vid and opened.json()['extraction']['read_only']
     f['questions'][0]['answer_text']='外部修改，必须重新核对'
@@ -122,7 +131,7 @@ def test_repeated_start_reuses_pending_task_and_stale_paid_response_is_not_appli
 
 
 def test_oversized_answer_kept_in_extraction_not_silently_truncated_for_research(client,monkeypatch):
-    r,_,_=complete(client,monkeypatch,False);body=r['payload'];body['questions'][0]['answer_text']='原文解答'*2300
+    r,_,_=complete(client,monkeypatch,False,legacy=True);body=r['payload'];body['questions'][0]['answer_text']='原文解答'*2300
     r=save(client,r,body).json();f=final(client,r);assert f.status_code==201,f.text
     frozen=client.get('/api/exam-extraction-versions/'+f.json()['versions'][0]['id']).json()['snapshot']
     assert len(frozen['questions'][0]['answer_text'])==9200 and not frozen['questions'][0]['research_ready']
@@ -152,7 +161,8 @@ def test_question_title_is_not_requested_and_long_legacy_title_never_truncates_o
     monkeypatch.setattr(worker,'generate',long_title);worker.run_one_knowledge();r=get(client,r)
     assert r['status']=='completed',r['error']
     assert r['payload']['questions'][0]['question_text']==TEXT.split('\n')[0]
-    assert r['payload']['questions'][0]['answer_text']=='1. 4。'
+    assert r['payload']['questions'][0]['answer_text']==''
+    assert r['payload']['content_mode']=='questions_only'
 
 
 def test_retry_recovers_historical_title_error_without_another_paid_call_even_at_budget_limit(client,monkeypatch):
