@@ -4,6 +4,8 @@ from .paper_research import locate
 BATCH_CHARS=24000
 BATCH_BLOCKS=180
 
+class AnchorError(ValueError):pass
+
 def batches(source):
     pieces=[]
     for b in source['blocks']:
@@ -21,9 +23,18 @@ def batches(source):
 
 def original_span(span,piece,original):
     value=span.model_dump();text=piece['text'];offset=piece['source_offset']
-    start=locate(text,value['start_anchor'],value['start_occurrence']) if value['start_anchor'] else 0
-    end=locate(text,value['end_anchor'],value['end_occurrence'])+len(value['end_anchor']) if value['end_anchor'] else len(text)
-    if end<=start:raise ValueError('题目定位终点必须在起点之后')
+    try:
+        start=locate(text,value['start_anchor'],value['start_occurrence']) if value['start_anchor'] else 0
+        end=locate(text,value['end_anchor'],value['end_occurrence'])+len(value['end_anchor']) if value['end_anchor'] else len(text)
+    except ValueError as exc:raise AnchorError(str(exc)) from None
+    if end<=start:
+        # Models sometimes count the end anchor from the question instead of the block.
+        # Recover only when there is exactly one eligible occurrence after this start.
+        anchor=value['end_anchor'];position=text.find(anchor,start) if anchor else -1
+        if position<0 or text.find(anchor,position+1)>=0:
+            raise AnchorError('题目起止位置不明确：结束文字位于起点之前，或有多个可能的结束位置')
+        end=position+len(anchor)
+    if end<=start:raise AnchorError('题目原文定位范围为空')
     start+=offset;end+=offset;full=original['text']
     def anchor_at(pos,length):
         anchor=full[pos:pos+length];found=-1;n=0

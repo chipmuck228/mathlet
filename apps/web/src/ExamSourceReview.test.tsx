@@ -99,3 +99,13 @@ it.each(['questions_only','legacy'])('allows confirmation after removing questio
  fireEvent.click(screen.getByLabelText(/我已核对整份试卷/));fireEvent.click(screen.getByRole('button',{name:'定稿并生成原题提取文件'}))
  await waitFor(()=>expect(vi.mocked(api).mock.calls.some(([p,i])=>p.endsWith('/finalize')&&JSON.parse(i!.body as string).revision===2)).toBe(true))
 })
+it('keeps unresolved-location questions editable beside successfully extracted questions',async()=>{
+ mock();const base=vi.mocked(api).getMockImplementation()!
+ const note='提取待核对：本题定位经AI复查仍无法确认，请对照原文补全题目，或移除此题。'
+ vi.mocked(api).mockImplementation(async(path,init)=>path==='/exam-extractions/e'&&!init?.method?{...record,payload:{...payload,questions:[q,{...q,key:'q2',number:'2',question_text:'',notes:note}]}}:base(path,init))
+ page();await screen.findByText(note);expect(screen.getByText(q.question_text)).toBeTruthy();expect(screen.getByText(/1 道待补全/)).toBeTruthy()
+ fireEvent.click(screen.getByRole('button',{name:'编辑第2题'}))
+ fireEvent.change(screen.getByLabelText('第2题题目'),{target:{value:'教师补全的完整第二题'}})
+ expect(screen.queryByText(note)).toBeNull()
+ expect((screen.getByRole('button',{name:'保存整份修改'}) as HTMLButtonElement).disabled).toBe(false)
+})

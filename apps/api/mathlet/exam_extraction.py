@@ -58,7 +58,7 @@ def validate_body(body,source,final=False):
 def detail(c,r):
     run=row(c,'knowledge_runs',r['id']);source=json.loads(r['source']);versions=[dict(v) for v in c.execute('SELECT id,revision,version_number,filename,created_at FROM exam_extraction_versions WHERE extraction_id=? ORDER BY version_number DESC',(r['id'],))]
     payload=json.loads(r['payload']) if r['payload'] else None
-    return {k:r[k] for k in ['id','document_id','revision','filename','created_at','parent_version']}|{'status':run['status'],'run_revision':run['revision'],'error':run['error'],'model':json.loads(run['model_json']),'source':source,'payload':payload,'read_only':any(v['revision']==r['revision'] for v in versions),'versions':versions,'stale':not source_current(c,r),'batch_count':len(batches(source)),'calls':[dict(x) for x in c.execute('SELECT step,status,reserved_tokens,error FROM knowledge_calls WHERE run_id=? ORDER BY rowid',(r['id'],))]}
+    return {k:r[k] for k in ['id','document_id','revision','filename','created_at','parent_version']}|{'status':run['status'],'run_revision':run['revision'],'error':run['error'],'model':json.loads(run['model_json']),'source':source,'payload':payload,'read_only':any(v['revision']==r['revision'] for v in versions),'versions':versions,'stale':not source_current(c,r),'batch_count':len(batches(source)),'completed_batches':len(batches(source)) if run['status']=='completed' else int(run['stage'].split(':')[1].split('/')[0]) if run['stage'].startswith('exam:') and '/' in run['stage'] else 0,'calls':[dict(x) for x in c.execute('SELECT step,status,reserved_tokens,error FROM knowledge_calls WHERE run_id=? ORDER BY rowid',(r['id'],))]}
 class Start(Strict):document_id:str
 
 def new_record(c,document_id,config=None,payload=None):
@@ -80,7 +80,7 @@ def start(body:Start):
         if existing:return detail(c,dict(existing))
         if not source['blocks'] or not any(b['text'].strip() for b in source['blocks']):raise HTTPException(422,'尚无可读取正文；扫描件需先进行文字识别。不会根据空白正文猜题')
         count=len(batches(source))
-        task_config=config.model_copy(update={'max_calls':max(config.max_calls,count),'output_token_budget':max(config.output_token_budget,count*10000)})
+        task_config=config.model_copy(update={'max_calls':max(config.max_calls,count*2),'output_token_budget':max(config.output_token_budget,count*16000)})
         return detail(c,new_record(c,body.document_id,task_config))
 @router.get('/documents/{document_id}/exam-extractions')
 def list_records(document_id:str):
@@ -227,9 +227,8 @@ def retry(extraction_id:str,body:Rev):
         if run['status'] not in {'failed','interrupted'} or not source_current(c,r) or r['payload']:raise HTTPException(409,'仅可重试来源未变化、尚未完成的提取任务')
         config=json.loads(run['model_json']);total=len(batches(json.loads(r['source'])))
         calls,reserved=c.execute('SELECT count(*),coalesce(sum(reserved_tokens),0) FROM knowledge_calls WHERE run_id=?',(extraction_id,)).fetchone()
-        completed=c.execute("SELECT count(DISTINCT step) FROM knowledge_calls WHERE run_id=? AND status IN ('succeeded','revalidated')",(extraction_id,)).fetchone()[0]
-        remaining=max(0,total-completed)
-        config.update(max_calls=max(config['max_calls'],calls+remaining),output_token_budget=max(config['output_token_budget'],reserved+remaining*10000))
+        remaining=total*2
+        config.update(max_calls=max(config['max_calls'],calls+remaining),output_token_budget=max(config['output_token_budget'],reserved+total*16000))
         c.execute("UPDATE knowledge_runs SET model_json=?,status='queued',error='',revision=revision+1,updated_at=? WHERE id=?",(packed(config),now(),extraction_id));return detail(c,r)
 
 class ImportFile(Strict):payload:dict
