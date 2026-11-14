@@ -14,6 +14,7 @@ from .source_review import source_identity,review_time,filename_at
 from .exam_models import ExamBody,ExamQuestion
 from .research_models import Strict,QuestionBody
 from .research import capture_question
+from .exam_batches import batches
 
 router=APIRouter(prefix='/api',tags=['whole exam extraction'])
 def digest(value):return hashlib.sha256(packed(value).encode()).hexdigest()
@@ -57,7 +58,7 @@ def validate_body(body,source,final=False):
 def detail(c,r):
     run=row(c,'knowledge_runs',r['id']);source=json.loads(r['source']);versions=[dict(v) for v in c.execute('SELECT id,revision,version_number,filename,created_at FROM exam_extraction_versions WHERE extraction_id=? ORDER BY version_number DESC',(r['id'],))]
     payload=json.loads(r['payload']) if r['payload'] else None
-    return {k:r[k] for k in ['id','document_id','revision','filename','created_at','parent_version']}|{'status':run['status'],'run_revision':run['revision'],'error':run['error'],'model':json.loads(run['model_json']),'source':source,'payload':payload,'read_only':any(v['revision']==r['revision'] for v in versions),'versions':versions,'stale':not source_current(c,r),'calls':[dict(x) for x in c.execute('SELECT step,status,reserved_tokens,error FROM knowledge_calls WHERE run_id=? ORDER BY rowid',(r['id'],))]}
+    return {k:r[k] for k in ['id','document_id','revision','filename','created_at','parent_version']}|{'status':run['status'],'run_revision':run['revision'],'error':run['error'],'model':json.loads(run['model_json']),'source':source,'payload':payload,'read_only':any(v['revision']==r['revision'] for v in versions),'versions':versions,'stale':not source_current(c,r),'batch_count':len(batches(source)),'calls':[dict(x) for x in c.execute('SELECT step,status,reserved_tokens,error FROM knowledge_calls WHERE run_id=? ORDER BY rowid',(r['id'],))]}
 class Start(Strict):document_id:str
 
 def new_record(c,document_id,config=None,payload=None):
@@ -73,14 +74,14 @@ def new_record(c,document_id,config=None,payload=None):
 def start(body:Start):
     config=load_provider()
     if not config.api_key or not config.model:raise HTTPException(422,'请先配置模型服务，再点击AI提取整份试卷')
-    if config.output_token_budget<10000:raise HTTPException(422,'整卷提取需至少10000输出 tokens 预算')
     with connect() as c:
         c.execute('BEGIN IMMEDIATE');source=raw_source(c,body.document_id)
         existing=c.execute("SELECT e.* FROM exam_extractions e JOIN knowledge_runs k ON k.id=e.id WHERE e.document_id=? AND k.status IN ('queued','running') ORDER BY e.created_at DESC LIMIT 1",(body.document_id,)).fetchone()
         if existing:return detail(c,dict(existing))
         if not source['blocks'] or not any(b['text'].strip() for b in source['blocks']):raise HTTPException(422,'尚无可读取正文；扫描件需先进行文字识别。不会根据空白正文猜题')
-        if len(source['blocks'])>500 or sum(len(b['text']) for b in source['blocks'])>100000:raise HTTPException(422,'原文超过本轮范围，请拆分文件；不会静默截断并声称整卷已提取')
-        return detail(c,new_record(c,body.document_id,config))
+        count=len(batches(source))
+        task_config=config.model_copy(update={'max_calls':max(config.max_calls,count),'output_token_budget':max(config.output_token_budget,count*10000)})
+        return detail(c,new_record(c,body.document_id,task_config))
 @router.get('/documents/{document_id}/exam-extractions')
 def list_records(document_id:str):
     with connect() as c:
@@ -224,7 +225,12 @@ def retry(extraction_id:str,body:Rev):
     with connect() as c:
         c.execute('BEGIN IMMEDIATE');r=row(c,'exam_extractions',extraction_id);run=row(c,'knowledge_runs',extraction_id);revision(run,body.revision)
         if run['status'] not in {'failed','interrupted'} or not source_current(c,r) or r['payload']:raise HTTPException(409,'仅可重试来源未变化、尚未完成的提取任务')
-        c.execute("UPDATE knowledge_runs SET status='queued',error='',revision=revision+1,updated_at=? WHERE id=?",(now(),extraction_id));return detail(c,r)
+        config=json.loads(run['model_json']);total=len(batches(json.loads(r['source'])))
+        calls,reserved=c.execute('SELECT count(*),coalesce(sum(reserved_tokens),0) FROM knowledge_calls WHERE run_id=?',(extraction_id,)).fetchone()
+        completed=c.execute("SELECT count(DISTINCT step) FROM knowledge_calls WHERE run_id=? AND status IN ('succeeded','revalidated')",(extraction_id,)).fetchone()[0]
+        remaining=max(0,total-completed)
+        config.update(max_calls=max(config['max_calls'],calls+remaining),output_token_budget=max(config['output_token_budget'],reserved+remaining*10000))
+        c.execute("UPDATE knowledge_runs SET model_json=?,status='queued',error='',revision=revision+1,updated_at=? WHERE id=?",(packed(config),now(),extraction_id));return detail(c,r)
 
 class ImportFile(Strict):payload:dict
 @router.post('/documents/{document_id}/exam-extractions/import',status_code=201)

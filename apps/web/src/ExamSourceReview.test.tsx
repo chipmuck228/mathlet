@@ -46,6 +46,7 @@ it('finalizes the whole transcription once and shows readonly download and expli
  await screen.findByRole('button',{name:'基于终稿继续修订'})
  expect(screen.queryByRole('button',{name:'编辑第1题'})).toBeNull()
  const link=screen.getByRole('link',{name:'下载核对完成的原题提取文件'});expect(link.getAttribute('href')).toBe('/api/exam-extraction-versions/v/download')
+ expect(screen.getByText('定稿文件名：')).toBeTruthy();expect(screen.getByText('final-V1.json')).toBeTruthy()
  await waitFor(()=>expect(screen.getByAltText('第1题配图').getAttribute('src')).toBe('data:image/png;base64,c25hcHNob3Q='))
 })
 it('starts AI extraction without a prior block-review workflow',async()=>{
