@@ -116,6 +116,9 @@ def init_db():
         init_exam(c)
         from .corpus_models import init_corpus
         init_corpus(c)
+        from .question_bank import init_bank
+        init_bank(c)
+        c.execute("INSERT OR IGNORE INTO schema_migrations VALUES(14,?)", (now(),))
         c.execute("INSERT OR IGNORE INTO schema_migrations VALUES(13,?)", (now(),))
         c.execute("INSERT OR IGNORE INTO schema_migrations VALUES(12,?)", (now(),))
         c.execute("INSERT OR IGNORE INTO schema_migrations VALUES(11,?)", (now(),))

@@ -64,7 +64,7 @@ def catalog():
                     try:validate_text(frozen['statement'])
                     except HTTPException as exc:blockers.append(str(exc.detail))
                 else:blockers.append(q.get('research_note') or '题目尚未形成可研究的完整版本，请在题目与研究中补充条件并确认')
-                questions.append({'id':v['id']+':'+q['key'],'exam_id':v['id'],'title':f['title']+' · '+(q['number'] or '未编号题'),'number':q['number'],'statement':frozen['statement'] if frozen else q['question_text'],'question_version_id':version_id,'blockers':blockers,'fingerprint':fingerprint(frozen) if frozen else '', 'runs':runs_by_question.get(version_id,[])})
+                questions.append({'id':v['id']+':'+q['key'],'exam_id':v['id'],'title':f['title']+' · '+(q['number'] or '未编号题'),'number':q['number'],'statement':frozen['statement'] if frozen else q['question_text'],'question_version_id':version_id,'question_id':current['id'] if current else q.get('research_question_id'),'blockers':blockers,'fingerprint':fingerprint(frozen) if frozen else '', 'runs':runs_by_question.get(version_id,[])})
         counts={}
         for q in questions:
             if q['fingerprint']:counts[q['fingerprint']]=counts.get(q['fingerprint'],0)+1

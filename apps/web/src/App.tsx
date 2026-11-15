@@ -95,7 +95,7 @@ export default function App() {
   const [requestedKnowledgeUnit,setRequestedKnowledgeUnit]=useState("")
   const [planningDirty,setPlanningDirty]=useState(false)
   const [researchDirty,setResearchDirty]=useState(false)
-  const [corpusDirty,setCorpusDirty]=useState(false)
+  const [corpusDirty,setCorpusDirty]=useState(false),[corpusBusy,setCorpusBusy]=useState(false)
   const [teachingDirty,setTeachingDirty]=useState(false)
   const [paperDirty,setPaperDirty]=useState(false),[requestedResearchRun,setRequestedResearchRun]=useState("")
   const [knowledgeDirty, setKnowledgeDirty] = useState(false)
@@ -155,6 +155,7 @@ export default function App() {
     } catch (e) { setMessage(String(e)) } finally { setBusy(false) }
   }
   function navigate(next: string) {
+    if (stage === "corpus" && corpusBusy && next !== stage) return
     if (stage === "corpus" && corpusDirty && next !== stage && !window.confirm("有未保存的知识关联或思路卡修改，离开将丢弃。继续？")) return
     if (stage === "tasks" && teachingDirty && next !== stage && !window.confirm("有未保存的应用映射或训练修改，离开会丢弃。继续？")) return
     if (stage === "planning" && planningDirty && next !== stage && !window.confirm("有未保存的规划修改，离开会丢弃。继续？")) return
@@ -168,13 +169,13 @@ export default function App() {
   const draftPicker = <select aria-label="选择小册子单元" value={draftId} onChange={e => { if (stage !== "editor" || window.confirm("请确认已保存当前单元。继续切换？")) setDraftId(e.target.value) }}><option value="">选择一个单元</option>{drafts.map(d => <option key={d.id} value={d.id}>{d.title} · 修订 {d.revision}</option>)}</select>
   return <div className="app-shell">
     <aside className="sidebar"><a className="brand" href="/">mathlet<span>数学小册子编辑工作台</span></a>
-      <div className="sidebar-caption">内容生产</div><nav aria-label="工作区">{stages.map(({ id, label, icon: Icon }, i) => <button key={id} className={stage === id ? "active" : ""} onClick={() => navigate(id)} aria-current={stage === id ? "page" : undefined}><Icon size={17} /><span>{label}</span><small>0{i + 1}</small></button>)}</nav>
+      <div className="sidebar-caption">内容生产</div><nav aria-label="工作区">{stages.map(({ id, label, icon: Icon }, i) => <button key={id} disabled={stage==="corpus"&&corpusBusy} title={stage==="corpus"&&corpusBusy?"正在保存或载入，请稍候":undefined} className={stage === id ? "active" : ""} onClick={() => navigate(id)} aria-current={stage === id ? "page" : undefined}><Icon size={17} /><span>{label}</span><small>0{i + 1}</small></button>)}</nav>
       <div className="sidebar-footer"><span className={online ? "dot online" : "dot"} />{online ? "本地服务已连接" : "等待本地 API"}<p>资料留存在本机<br />代码通过 GitHub 管理</p></div></aside>
     <div className="workspace"><header className="workspace-header"><span>Mathlet / {stages.find(s => s.id === stage)?.label}</span><span className="label">本地版 · 0.3</span></header>
       <main><div className="intro"><div><p className="eyebrow">理解知识 · 发现连接 · 建立思路</p><h1>{({ materials: "从可信资料开始。", sources: "让每个条件都准确。", planning: "把知识组织成复习路径。", knowledge: "从知识草案到教师确认。", research:"从完整题目建立解题思路。", tasks: "把生成过程留在记录里。", editor: "让思路经得起检查。", preview: "回到学生的阅读视角。", releases: "交付一个确定的版本。" } as Record<string, string>)[stage]}</h1></div><Button variant="outline" size="sm" onClick={() => void refresh()}><RefreshCw />刷新列表</Button></div>
       {!online && <div className="notice" role="alert">尚未连接 API。请按 README 启动 FastAPI（8000）和 Worker；前端通过 Vite 代理访问。</div>}
       <Message value={message} />
-      {stage === "corpus" && <CorpusResearchPage onDirtyChange={setCorpusDirty} onOpenRun={id=>{setRequestedResearchRun(id);setStage("research")}} />}
+      {stage === "corpus" && <CorpusResearchPage onDirtyChange={setCorpusDirty} onBusyChange={setCorpusBusy} />}
       {stage === "paper" && <PaperResearchPage onDirtyChange={setPaperDirty} onOpenRun={id=>{setRequestedResearchRun(id);setStage("research")}} />}
       {stage === "research" && <ResearchPage initialRunId={requestedResearchRun} documents={documents} onDirtyChange={setResearchDirty} openKnowledge={()=>setStage("knowledge")} />}
       {stage === "knowledge" && <KnowledgePage onOpenResearch={()=>setStage("research")} initialUnitId={requestedKnowledgeUnit} onDirtyChange={setKnowledgeDirty} />}

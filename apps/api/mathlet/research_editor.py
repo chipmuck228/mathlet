@@ -220,6 +220,8 @@ def finalize_manuscript(run_id:str,output_id:str,body:Finalize):
         verification=c.execute('SELECT payload FROM independent_reviews WHERE run_id=?',(run_id,)).fetchone()
         if verification:snapshot['independent_verification']=json.loads(verification['payload'])
         key=uid();c.execute('INSERT INTO research_analysis_versions VALUES(?,?,?,?,?)',(key,output_id,output['revision']+1,packed(snapshot),now()))
+        from .question_bank import register_analysis
+        register_analysis(c,key,snapshot)
         return {'id':key,'snapshot':snapshot}
 
 @router.get('/versions/{version_id}')

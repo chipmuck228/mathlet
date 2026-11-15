@@ -182,7 +182,13 @@ def confirm_question(question_id:str,body:Confirm):
         c.execute('UPDATE research_questions SET confirmed_revision=revision,reviewer=?,review_note=? WHERE id=?',(body.reviewer,body.note,question_id))
         frozen.update(question_id=question_id,revision=question['revision'],reviewer=body.reviewer,review_note=body.note)
         c.execute('INSERT OR IGNORE INTO research_question_versions(id,question_id,revision,snapshot,created_at) VALUES(?,?,?,?,?)',(uid(),question_id,question['revision'],packed(frozen),now()))
+        from .question_bank import register_question
+        register_question(c,question_id)
         return question_json(c,row(c,'research_questions',question_id))
+@router.get('/questions/{question_id}')
+def get_question(question_id:str):
+    with connect() as c:return question_json(c,row(c,'research_questions',question_id))
+
 @router.get('/questions/{question_id}/history')
 def question_history(question_id:str):
     with connect() as c:
@@ -354,6 +360,8 @@ def freeze_analysis(output_id:str,body:Retry):
             'question':json.loads(question['snapshot']),'knowledge':json.loads(context['snapshot']),'model':json.loads(run['model_json']),'run_id':run['id'],'input':meta,
             'graph':json.loads(row(c,'research_graph_versions',meta['graph_version_id'])['snapshot']) if meta.get('graph_version_id') else None,'created_at':now()}
         key=uid();c.execute('INSERT INTO research_analysis_versions VALUES(?,?,?,?,?)',(key,output_id,value['revision'],packed(snapshot),now()))
+        from .question_bank import register_analysis
+        register_analysis(c,key,snapshot)
         return {'id':key,'snapshot':snapshot}
 @router.get('/analysis-versions')
 def analysis_versions():

@@ -152,6 +152,8 @@ def publish_questions(c,r,value,assets,version_id):
                 c.execute('INSERT INTO research_question_history VALUES(?,?,?,?,?)',(uid(),qid,existing['revision'],packed(existing),now()))
                 c.execute("UPDATE research_questions SET payload=?,revision=revision+1,confirmed_revision=NULL,reviewer='',review_note='' WHERE id=?",(packed(payload),qid))
         else:c.execute('INSERT INTO research_questions(id,payload,created_at) VALUES(?,?,?)',(qid,packed(payload),now()))
+        from .question_bank import register_question
+        register_question(c,qid)
         current=row(c,'research_questions',qid);ready=qb.figure_status!='pending'
         if ready:
             frozen=json.loads(packed(payload))
@@ -198,6 +200,8 @@ def finalize(extraction_id:str,body:Final):
             filename=r['filename'][:-5]+'-V'+str(number)+'.json'
             snapshot={'format':'mathlet-exam-extraction','schema_version':1,'content_mode':value['content_mode'],'title':value['title'],'questions':questions,'notes':value['notes'],'assets':assets,'source':d['source'],'extraction_id':extraction_id,'extraction_revision':r['revision'],'version_id':key,'version_number':number,'filename':filename,'teacher_confirmed_transcription':True,'answer_math_verified':False,'created_at':now(),'parent_version':r['parent_version']}
             c.execute('INSERT INTO exam_extraction_versions VALUES(?,?,?,?,?,?,?)',(key,extraction_id,r['revision'],number,packed(snapshot),filename,now()))
+            from .question_bank import register_exam
+            register_exam(c,key,snapshot)
             c.execute('INSERT INTO exam_document_heads VALUES(?,?) ON CONFLICT(document_id) DO UPDATE SET version_id=excluded.version_id',(r['document_id'],key))
             v=row(c,'exam_extraction_versions',key)
         result=detail(c,row(c,'exam_extractions',extraction_id))

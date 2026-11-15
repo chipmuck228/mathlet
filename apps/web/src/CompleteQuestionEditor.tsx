@@ -6,10 +6,11 @@ import MathBlockEditor from './MathBlockEditor'
 import {initialQuestion,mathBlock,type Question,type QuestionBody} from './ResearchManuscriptTypes'
 
 function bodyOf(value:Question|null):QuestionBody{return value?Object.fromEntries(Object.keys(initialQuestion).map(k=>[k,value.payload[k as keyof QuestionBody]])) as QuestionBody:initialQuestion}
-export default function CompleteQuestionEditor({initial,documents,disabled,onDirty,onSaved}:{initial:Question|null;documents:Document[];disabled:boolean;onDirty:(dirty:boolean)=>void;onSaved:(value:Question)=>void}){
+export default function CompleteQuestionEditor({initial,documents,disabled,onDirty,onSaved,onBusyChange}:{onBusyChange?:(busy:boolean)=>void;initial:Question|null;documents:Document[];disabled:boolean;onDirty:(dirty:boolean)=>void;onSaved:(value:Question)=>void}){
  const [body,setBody]=useState<QuestionBody>(bodyOf(initial)),[base,setBase]=useState(bodyOf(initial)),[saved,setSaved]=useState(initial)
  const [doc,setDoc]=useState(''),[blocks,setBlocks]=useState<Block[]>([]),[busy,setBusy]=useState(false),[error,setError]=useState(''),[confirmed,setConfirmed]=useState(false)
  const seen=useRef<Record<string,Block>>({});const dirty=JSON.stringify(body)!==JSON.stringify(base)
+ useEffect(()=>{onBusyChange?.(busy);return()=>onBusyChange?.(false)},[busy,onBusyChange])
  useEffect(()=>{onDirty(dirty);return()=>onDirty(false)},[dirty,onDirty])
  useEffect(()=>{let alive=true;setBlocks([]);if(doc)void api<Block[]>(`/documents/${doc}/blocks`).then(list=>{if(alive){setBlocks(list);for(const b of list)seen.current[b.id]=b}}).catch(e=>{if(alive)setError(String(e))});return()=>{alive=false}},[doc])
  function update(key:keyof QuestionBody,value:unknown){setBody(old=>key==='answer_status'&&value==='absent'?{...old,answer_status:'absent',reference_answer:'',answer_block_ids:[]}:{...old,[key]:value});setConfirmed(false)}

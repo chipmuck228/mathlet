@@ -17,7 +17,7 @@ function mock(withMapping=false){vi.mocked(api).mockImplementation(async(path,in
  if(path==='/corpus/mappings'&&init?.method==='POST')return {results:[{id:'map'}]}
  throw Error('Unexpected '+path)
 })}
-function page(onDirty=vi.fn()){render(<CorpusResearchPage onOpenRun={vi.fn()} onDirtyChange={onDirty}/>)}
+function page(onDirty=vi.fn()){render(<CorpusResearchPage onDirtyChange={onDirty}/>)}
 it('queues independent questions without any selected knowledge and blocks incomplete figure questions',async()=>{
  mock();page();await screen.findByText(/exam-V1.json/)
  expect(vi.mocked(api).mock.calls.every(([,i])=>!i?.method)).toBe(true)
@@ -54,4 +54,63 @@ it('can auto-match all effective knowledge finals without requiring a preselecte
  const sent=JSON.parse(vi.mocked(api).mock.calls.find(([p,i])=>p==='/corpus/mappings'&&i?.method==='POST')![1]!.body as string)
  expect(sent.version_ids).toEqual([])
  expect(vi.mocked(api).mock.calls.some(([p])=>p==='/corpus/studies')).toBe(false)
+})
+it('opens the exact blocked question inline, without a fallback to the first study',async()=>{
+ mock();const base=vi.mocked(api).getMockImplementation()!
+ const conditions={id:'exact-q2',revision:1,confirmed:false,stale:false,version_id:null,payload:{title:'指定第二题',statement:'指定第二题正文',question_block_ids:[],answer_block_ids:[],answer_status:'absent',reference_answer:'',figure_status:'pending',diagram_description:'',region:'',year:'',number:'2',notes:'',assets:[],sources:[]}}
+ vi.mocked(api).mockImplementation(async(path,init)=>{
+  if(path==='/corpus/catalog')return {...catalog,questions:catalog.questions.map(q=>({...q,question_id:q.number==='2'?'exact-q2':'exact-q1'}))}
+  if(path==='/research/questions/exact-q2')return conditions
+  if(path==='/documents')return []
+  return base(path,init)
+ })
+ page();await screen.findByText(/exam-V1.json/);fireEvent.click(screen.getByRole('checkbox',{name:/合成卷一 · exam/}))
+ fireEvent.click(screen.getByRole('button',{name:'在本页补充、确认本题条件'}))
+ await screen.findByRole('region',{name:'完整题目编辑'})
+ expect(screen.getByDisplayValue('指定第二题正文')).toBeTruthy()
+ expect(vi.mocked(api).mock.calls.some(([p])=>p==='/research/questions/exact-q2')).toBe(true)
+ expect(vi.mocked(api).mock.calls.some(([p])=>p.startsWith('/research-editor/runs/'))).toBe(false)
+ fireEvent.click(screen.getByRole('button',{name:'返回题库研究列表'}))
+ await screen.findByText('有图题');expect((screen.getByRole('checkbox',{name:/合成卷一 · exam/}) as HTMLInputElement).checked).toBe(true)
+})
+it('reviews and finalizes the selected study inline and returns to the same selected exam',async()=>{
+ mock();const base=vi.mocked(api).getMockImplementation()!
+ const question={title:'第一题指定研究',statement:'已知x=2求x平方',question_block_ids:[],answer_block_ids:[],answer_status:'absent',reference_answer:'',figure_status:'not_needed',diagram_description:'',region:'',year:'',number:'1',notes:'',assets:[],sources:[]}
+ const body={given_conditions:['x=2'],goals:['求平方'],thinking_operations:['代入'],problem_types:['计算'],classification_reason:'已知数求平方',assessed_points:[],knowledge_breakdown:[],approaches:[],recognition_cues:['已知x'],common_mistakes:[],variation_prompts:[],scope_notes:[],missing_information:[]}
+ const out={id:'output',revision:1,body,original_body:body,checks:[],final_version:null,final_blockers:[]}
+ const study={id:'run',revision:2,title:question.title,status:'completed',stale:false,error:'',created_at:'2026-11-15',parent_version:null,model:{model:'mock'},task:{context_id:'ctx',question_version_id:'qv',workflow:'independent-v1'},outputs:[out],knowledge:{items:[],inherited_relations:[],version_ids:[]},question,calls:[]}
+ let finalized=false
+ vi.mocked(api).mockImplementation(async(path,init)=>{
+  if(path==='/corpus/catalog')return {...catalog,questions:catalog.questions.map(q=>({...q,runs:q.runs.map(r=>({...r,finals:finalized?[{id:'new-final',stale:false,created_at:'2026-11-15'}]:[]}))}))}
+  if(path==='/editor/profiles')return {active:'deepseek',profiles:[{id:'deepseek',label:'DeepSeek',model:'mock',ready:true}]}
+  if(path==='/research-editor/runs/run')return study
+  if(path==='/research-editor/runs/run/discussions')return []
+  if(path==='/research-editor/runs/run/outputs/output/finalize'){finalized=true;return {id:'new-final'}}
+  if(path==='/research-editor/versions/new-final')return {id:'new-final',output_id:'output',revision:2,snapshot:{analysis:body,checks:[],question,knowledge:study.knowledge,run_id:'run',run_revision:3,input:study.task,model:{model:'mock'}}}
+  return base(path,init)
+ })
+ page();await screen.findByText(/exam-V1.json/);fireEvent.click(screen.getByRole('checkbox',{name:/合成卷一 · exam/}))
+ fireEvent.click(screen.getByRole('button',{name:'打开研究稿／审核定稿'}))
+ await screen.findByRole('heading',{name:/第一题指定研究 · 研究工作稿/})
+ expect(screen.queryByRole('combobox',{name:'已有研究'})).toBeNull()
+ const confirmation=screen.getByLabelText(/我已检查整份研究稿/)
+ fireEvent.click(confirmation);fireEvent.click(screen.getByRole('button',{name:'形成研究终稿'}))
+ await screen.findByRole('heading',{name:/第一题指定研究 · 研究终稿/})
+ expect(finalized).toBe(true)
+ await waitFor(()=>expect((screen.getByRole('button',{name:'返回题库研究列表'}) as HTMLButtonElement).disabled).toBe(false))
+ fireEvent.click(screen.getByRole('button',{name:'返回题库研究列表'}))
+ await screen.findByRole('checkbox',{name:/选择研究终稿/})
+ expect((screen.getByRole('checkbox',{name:/合成卷一 · exam/}) as HTMLInputElement).checked).toBe(true)
+ expect(vi.mocked(api).mock.calls.some(([p])=>p==='/research-editor/runs')).toBe(false)
+})
+it('protects unsaved edits in the exact question and offers explicit discard',async()=>{
+ mock();const base=vi.mocked(api).getMockImplementation()!
+ const target={id:'q2',revision:1,confirmed:false,stale:false,version_id:null,payload:{title:'待补第二题',statement:'第二题待修订',question_block_ids:[],answer_block_ids:[],answer_status:'absent',reference_answer:'',figure_status:'pending',diagram_description:'',region:'',year:'',number:'2',notes:'',assets:[],sources:[]}}
+ vi.mocked(api).mockImplementation(async(path,init)=>path==='/corpus/catalog'?{...catalog,questions:catalog.questions.map(q=>({...q,question_id:'q2'}))}:path==='/research/questions/q2'?target:path==='/documents'?[]:base(path,init))
+ page();await screen.findByText(/exam-V1.json/);fireEvent.click(screen.getByRole('checkbox',{name:/合成卷一 · exam/}));fireEvent.click(screen.getByRole('button',{name:'在本页补充、确认本题条件'}))
+ const input=await screen.findByLabelText('提取结果 完整题干');fireEvent.change(input,{target:{value:'未保存的条件修订'}})
+ await waitFor(()=>expect((screen.getByRole('button',{name:'返回题库研究列表'}) as HTMLButtonElement).disabled).toBe(true))
+ fireEvent.click(screen.getByRole('button',{name:'放弃未保存编辑并返回'}))
+ await screen.findByRole('button',{name:'在本页补充、确认本题条件'})
+ expect(vi.mocked(api).mock.calls.some(([,i])=>i?.method==='PUT')).toBe(false)
 })
