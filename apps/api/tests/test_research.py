@@ -157,13 +157,17 @@ def test_critic_failure_reuses_draft_checkpoint_and_teacher_edits_preserve_origi
     assert client.get('/api/research/outputs/'+out['id']+'/history').json()
 
 
-def test_missing_information_blocks_approval_until_teacher_resolves_it(client,monkeypatch):
+def test_teacher_can_approve_missing_information_advice(client,monkeypatch):
     ctx,_,_=context(client,monkeypatch);q,_,_=question(client)
     task=start(client,ctx,monkeypatch,'analysis',q);out=task['outputs'][0]
     changed=out['body']|{'missing_information':['尚需明确条件']}
     updated=client.put('/api/research/outputs/'+out['id'],json={'revision':out['revision'],'body':changed}).json()
-    assert review(client,updated).status_code==422
-    assert review(client,updated,decision='return').status_code==200
+    approved=review(client,updated);assert approved.status_code==200,approved.text
+    latest=approved.json();output=latest['outputs'][0]
+    fixed=client.post('/api/research/outputs/'+output['id']+'/versions',json={'revision':output['revision']})
+    assert fixed.status_code==201,fixed.text
+    assert fixed.json()['snapshot']['analysis']['missing_information']==['尚需明确条件']
+    assert fixed.json()['snapshot']['teacher_review']['acknowledged_advisories']
 
 
 def test_withdrawn_relation_invalidates_graph_dependency_not_archived_graph_bytes(client,monkeypatch):

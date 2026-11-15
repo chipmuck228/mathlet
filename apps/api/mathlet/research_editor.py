@@ -76,13 +76,13 @@ def check_analysis(body,meta,context,final=False):
         value=analysis_schema(meta).model_validate(body).model_dump();validate_references(value,'analysis',context)
     except ValueError as exc:raise HTTPException(422,str(exc)) from None
     if final:
-        if value['missing_information']:raise HTTPException(422,'研究稿仍列有尚缺信息，请补全依据或修正该判断后再定稿')
         def walk(node):
             if isinstance(node,str):validate_text(node)
             elif isinstance(node,list):
                 for x in node:walk(x)
             elif isinstance(node,dict):
-                for x in node.values():walk(x)
+                for key,x in node.items():
+                    if key!='missing_information':walk(x)
         walk(value)
     return value
 
@@ -98,8 +98,11 @@ def manuscript(c,run):
     parent=c.execute('SELECT parent_version FROM research_manuscripts WHERE run_id=?',(run['id'],)).fetchone()
     data['parent_version']=parent['parent_version'] if parent else None
     for output in data['outputs']:
-        found=c.execute('SELECT id,created_at FROM research_analysis_versions WHERE output_id=? AND revision=?',(output['id'],output['revision'])).fetchone()
-        output['final_version']=dict(found) if found else None
+        found=c.execute('SELECT id,created_at,snapshot FROM research_analysis_versions WHERE output_id=? AND revision=?',(output['id'],output['revision'])).fetchone()
+        output['final_version']={k:found[k] for k in ['id','created_at']} if found else None
+        output['teacher_review']=json.loads(found['snapshot']).get('teacher_review') if found else None
+        from .research_review import advisories
+        output['review_advisories']=advisories(output['body'],output['checks'])
         output['final_blockers']=[]
         try:check_analysis(output['body'],meta,context,True)
         except HTTPException as exc:output['final_blockers']=[str(exc.detail)]
@@ -202,6 +205,7 @@ class Finalize(Strict):
     revision:int
     run_revision:int
     confirmed:bool
+    teacher_review_note:str=Field(default='',max_length=6000)
 @router.post('/runs/{run_id}/outputs/{output_id}/finalize',status_code=201)
 def finalize_manuscript(run_id:str,output_id:str,body:Finalize):
     if not body.confirmed:raise HTTPException(422,'请确认整份研究稿的条件、知识引用和解题思路')
@@ -217,6 +221,8 @@ def finalize_manuscript(run_id:str,output_id:str,body:Finalize):
         c.execute('UPDATE knowledge_runs SET revision=revision+1,updated_at=? WHERE id=?',(now(),run_id))
         parent=c.execute('SELECT parent_version FROM research_manuscripts WHERE run_id=?',(run_id,)).fetchone()
         snapshot={'analysis':valid,'checks':json.loads(output['checks']),'reviewer':'本机教师整稿确认','review_note':'整份单题研究稿确认','question':json.loads(row(c,'research_question_versions',meta['question_version_id'])['snapshot']),'knowledge':json.loads(context['snapshot']),'model':json.loads(run['model_json']),'run_id':run_id,'run_revision':run['revision']+1,'input':meta,'graph':json.loads(row(c,'research_graph_versions',meta['graph_version_id'])['snapshot']) if meta.get('graph_version_id') else None,'created_at':now(),'editorial':{'whole_manuscript_confirmed':True,'parent_version':parent['parent_version'] if parent else None,'advisory_relations_teacher_verified':False}}
+        from .research_review import teacher_review
+        snapshot['teacher_review']=teacher_review(valid,json.loads(output['checks']),body.teacher_review_note,body.revision,'本机教师整稿确认')
         verification=c.execute('SELECT payload FROM independent_reviews WHERE run_id=?',(run_id,)).fetchone()
         if verification:snapshot['independent_verification']=json.loads(verification['payload'])
         key=uid();c.execute('INSERT INTO research_analysis_versions VALUES(?,?,?,?,?)',(key,output_id,output['revision']+1,packed(snapshot),now()))

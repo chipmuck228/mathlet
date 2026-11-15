@@ -78,3 +78,8 @@ body{--keyboard-zindex:2100}
 .corpus-question-editor .manuscript-grid{grid-template-columns:minmax(150px,.6fr) minmax(0,1.9fr) minmax(230px,1fr)}
 @media(max-width:1100px){.corpus-question-editor .manuscript-grid{grid-template-columns:1fr}.corpus-question-editor .manuscript-list,.corpus-question-editor .manuscript-chat{position:static;max-height:none}}
 .corpus-status-legend{display:flex;flex-wrap:wrap;gap:10px;margin:16px 0}
+
+.research-review-advice{border-left:3px solid #b68b42;background:#fff8e9;padding:12px;margin:14px 0;font-size:13px}
+.research-review-advice details{margin:10px 0;padding:8px 0;border-top:1px solid #e7d8b8}
+.research-review-advice summary{font-weight:600;cursor:pointer}
+.research-review-advice textarea{min-height:85px}

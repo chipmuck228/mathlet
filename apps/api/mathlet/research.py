@@ -317,14 +317,16 @@ def review(run_id:str,body:Review):
                     key=(decoded['source_ref'],decoded['target_ref'],decoded['relation_type'])
                     if key in existing_edges and existing_edges[key]!=value['id']:raise HTTPException(422,'同方向同类型关系已存在，请避免重复审核纳入')
                     existing_edges[key]=value['id']
-                if value['kind']=='analysis' and decoded['missing_information']:raise HTTPException(422,'分析仍有缺失信息，请补全题目或修订分析后确认')
+                if value['kind']=='analysis':
+                    from .research_editor import check_analysis
+                    check_analysis(decoded,meta,row(c,'research_contexts',meta['context_id']),True)
                 def check(node):
                     if isinstance(node,str):validate_text(node)
                     elif isinstance(node,list):
                         for x in node:check(x)
                     elif isinstance(node,dict):
                         for x in node.values():check(x)
-                check(decoded)
+                if value['kind']!='analysis':check(decoded)
             selected.append(value)
         for value in selected:
             c.execute('INSERT INTO research_output_history VALUES(?,?,?,?,?)',(uid(),value['id'],value['revision'],packed(value),now()))
@@ -359,6 +361,8 @@ def freeze_analysis(output_id:str,body:Retry):
         snapshot={'analysis':json.loads(value['body']),'checks':json.loads(value['checks']),'reviewer':value['reviewer'],'review_note':value['note'],
             'question':json.loads(question['snapshot']),'knowledge':json.loads(context['snapshot']),'model':json.loads(run['model_json']),'run_id':run['id'],'input':meta,
             'graph':json.loads(row(c,'research_graph_versions',meta['graph_version_id'])['snapshot']) if meta.get('graph_version_id') else None,'created_at':now()}
+        from .research_review import teacher_review
+        snapshot['teacher_review']=teacher_review(snapshot['analysis'],snapshot['checks'],value['note'],value['revision'],value['reviewer'])
         key=uid();c.execute('INSERT INTO research_analysis_versions VALUES(?,?,?,?,?)',(key,output_id,value['revision'],packed(snapshot),now()))
         from .question_bank import register_analysis
         register_analysis(c,key,snapshot)

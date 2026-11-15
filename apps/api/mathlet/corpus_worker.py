@@ -85,7 +85,7 @@ def run_corpus(run,config,snapshot):
                 result=validated(value)
                 if not {link['ref'] for link in result['links']}<=allowed:raise ValueError('匹配引用了当前知识批次之外的条目')
                 return result
-            values.append(call(run,config,'corpus:mapping' if len(groups)==1 else f'corpus:mapping:{i+1}',task+'\n当前知识目录为自动分批的一部分。只判断本批相关性，跨批缺口稍后统一汇总。' if len(groups)>1 else task,{'question':question,'reviewed_analysis':analysis['analysis'],'knowledge_catalog':group},5000,validate_group,system_prompt=SYSTEM,prompt_version='corpus-mapping-v1'))
+            values.append(call(run,config,'corpus:mapping' if len(groups)==1 else f'corpus:mapping:{i+1}',task+'\n当前知识目录为自动分批的一部分。只判断本批相关性，跨批缺口稍后统一汇总。' if len(groups)>1 else task,{'question':question,'reviewed_analysis':analysis['analysis'],'teacher_review':analysis.get('teacher_review'),'knowledge_catalog':group},5000,validate_group,system_prompt=SYSTEM,prompt_version='corpus-mapping-v1'))
         value=values[0]
         if len(values)>1:
             with connect() as c:
@@ -95,7 +95,7 @@ def run_corpus(run,config,snapshot):
                 result=validated(value)
                 if not {l['ref'] for l in result['links']}<=candidate_refs:raise ValueError('匹配汇总引入了未经候选支持的知识引用')
                 return result
-            value=call(run,config,'corpus:mapping-merge','汇总各批知识匹配候选，不重新解题。合并重复关联与作用，检查候选缺口是否已被其他批的匹配覆盖，保留真正未匹配的缺口。不得新增未提供的ref，依据仍须逐字来自题目或研究。返回结构：'+packed(MappingBody.model_json_schema()),{'question':question,'reviewed_analysis':analysis['analysis'],'batch_candidates':values},5000,merge_validate,system_prompt=SYSTEM,prompt_version='corpus-mapping-v1')
+            value=call(run,config,'corpus:mapping-merge','汇总各批知识匹配候选，不重新解题。合并重复关联与作用，检查候选缺口是否已被其他批的匹配覆盖，保留真正未匹配的缺口。不得新增未提供的ref，依据仍须逐字来自题目或研究。返回结构：'+packed(MappingBody.model_json_schema()),{'question':question,'reviewed_analysis':analysis['analysis'],'teacher_review':analysis.get('teacher_review'),'batch_candidates':values},5000,merge_validate,system_prompt=SYSTEM,prompt_version='corpus-mapping-v1')
         with connect() as c:
             c.execute('BEGIN IMMEDIATE')
             if not corpus_current(c,meta):raise ValueError('研究或知识版本在关联期间变化；未写入过期关联')
@@ -108,7 +108,7 @@ def run_corpus(run,config,snapshot):
         project=c.execute('SELECT project_id FROM corpus_card_tasks WHERE run_id=?',(run['id'],)).fetchone()['project_id'];finals=[]
         for s in meta['sources']:
             f=json.loads(row(c,'research_analysis_versions',s['id'])['snapshot'])
-            finals.append({'id':s['id'],'question':safe_question(f['question']),'analysis':f['analysis']})
+            finals.append({'id':s['id'],'question':safe_question(f['question']),'analysis':f['analysis'],'teacher_review':f.get('teacher_review')})
     if len(packed(finals))>240000:raise ValueError('研究正文过长，请减少本次所选终稿')
     def validate(value):
         result=Cards.model_validate(value)

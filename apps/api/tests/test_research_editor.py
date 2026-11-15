@@ -104,16 +104,21 @@ def test_inline_save_whole_final_and_revision_fork_keep_old_file_immutable(clien
     assert client.get(f"/api/research-editor/versions/{frozen['id']}").json()['snapshot']['analysis']==updated
 
 
-def test_ai_opinion_not_veto_but_missing_information_and_bad_refs_still_block(client,monkeypatch):
+def test_missing_information_is_advice_teacher_can_approve_but_bad_refs_still_block(client,monkeypatch):
     task,_,_,_,_=start(client,monkeypatch);out=task['outputs'][0]
     with connect() as c:c.execute('UPDATE research_outputs SET checks=? WHERE id=?',(json.dumps([{'approach_id':'','category':'teaching','message':'是否增加迁移训练，请教师判断'}]),out['id']))
     missing=save(client,task,out['body']|{'missing_information':['需要补充必要条件']}).json()
-    assert missing['outputs'][0]['final_blockers'] and finalize(client,missing).status_code==422
-    valid=missing['outputs'][0]['body']|{'missing_information':[]}
-    valid['knowledge_breakdown']=[{'ref':'foreign-reference','role':'错误引用','conditions':'未知'}]
+    assert missing['outputs'][0]['final_blockers']==[]
+    advice=missing['outputs'][0]['review_advisories']
+    assert advice[0]['message']=='需要补充必要条件' and advice[0]['guidance']
+    valid=missing['outputs'][0]['body']|{'knowledge_breakdown':[{'ref':'foreign-reference','role':'错误引用','conditions':'未知'}]}
     assert save(client,missing,valid).status_code==422
-    corrected=save(client,missing,missing['outputs'][0]['body']|{'missing_information':[]}).json()
-    assert finalize(client,corrected).status_code==201
+    approved=finalize(client,missing);assert approved.status_code==201,approved.text
+    frozen=approved.json()['snapshot']
+    assert frozen['analysis']['missing_information']==['需要补充必要条件']
+    assert frozen['teacher_review']['acknowledged_advisories']
+    assert len(frozen['teacher_review']['advisories'])==2
+    assert frozen['checks'][0]['message']=='是否增加迁移训练，请教师判断'
 
 
 def test_chat_carries_unsaved_research_not_unchecked_answer_or_images_and_does_not_edit(client,monkeypatch):
@@ -193,3 +198,28 @@ def test_formula_and_incomplete_question_guards_remain_after_simplification(clie
     assert client.put(f"/api/research/questions/{q['id']}",json=body|{'revision':q['revision'],'figure_status':'pending'}).status_code==200
     refused=client.post('/api/research-editor/runs',json={'version_ids':[v['id']],'question_version_id':q['version_id'],'request_key':'incomplete-question-key'})
     assert refused.status_code==409
+
+
+def test_teacher_note_is_saved_with_ai_advice_and_old_final_remains_immutable(client,monkeypatch):
+    task,_,_,_,_=start(client,monkeypatch)
+    missing=save(client,task,task['outputs'][0]['body']|{'missing_information':['AI认为需补图形条件']}).json();out=missing['outputs'][0]
+    url=f"/api/research-editor/runs/{missing['id']}/outputs/{out['id']}/finalize"
+    assert client.post(url,json={'run_revision':missing['revision'],'revision':out['revision'],'confirmed':False}).status_code==422
+    response=client.post(url,json={'run_revision':missing['revision'],'revision':out['revision'],'confirmed':True,'teacher_review_note':'原题文字已给全，AI判断不适用。'})
+    assert response.status_code==201,response.text
+    version=response.json();assert version['snapshot']['teacher_review']['note']=='原题文字已给全，AI判断不适用。'
+    opened=client.get('/api/research-editor/runs/'+missing['id']).json()
+    assert opened['outputs'][0]['teacher_review']['note']=='原题文字已给全，AI判断不适用。'
+    download='/api/research/versions/analysis/'+version['id']+'/download';old=client.get(download).content
+    fork=client.post('/api/research-editor/versions/'+version['id']+'/revise').json()
+    revised=save(client,fork,fork['outputs'][0]['body']|{'missing_information':[]}).json()
+    assert finalize(client,revised).status_code==201
+    assert client.get(download).content==old
+
+
+def test_missing_information_advice_does_not_override_stale_source_or_revision_guards(client,monkeypatch):
+    task,_,q,body,block=start(client,monkeypatch)
+    missing=save(client,task,task['outputs'][0]['body']|{'missing_information':['AI疑问']}).json()
+    assert finalize(client,task).status_code==409
+    with connect() as c:c.execute('UPDATE blocks SET text=? WHERE id=?',('原文改变',block['id']))
+    assert finalize(client,missing).status_code==409

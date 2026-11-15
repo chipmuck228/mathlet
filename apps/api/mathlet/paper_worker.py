@@ -50,7 +50,7 @@ def run_paper(run,config,snapshot):
         with connect() as c:
             for s in meta['sources']:
                 f=json.loads(row(c,'research_analysis_versions',s['id'])['snapshot'])
-                finals.append({'id':s['id'],'question':safe_question(f['question']),'analysis':f['analysis'],'knowledge':f['knowledge']})
+                finals.append({'id':s['id'],'question':safe_question(f['question']),'analysis':f['analysis'],'teacher_review':f.get('teacher_review'),'knowledge':f['knowledge']})
         if len(packed(finals))>240000:raise ValueError('研究终稿正文过长，请减少本轮选择')
         def validate_cards(value):
             parsed=Cards.model_validate(value)

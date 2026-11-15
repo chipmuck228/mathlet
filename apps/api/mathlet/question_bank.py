@@ -75,7 +75,7 @@ def build(c,key):
         if valid:
             types.update(analysis['problem_types']);names.update(x['name'] for x in analysis.get('identified_knowledge',[]))
             for item in used_knowledge:units.add(item['unit_title']);names.add(item['title'])
-        studies.append({'id':v['id'],'revision':v['revision'],'run_id':f['run_id'],'question_version_id':entry['question_version_id'],'current':valid,'created_at':v['created_at'],'analysis':analysis,'knowledge':used_knowledge,'reviewer':f.get('reviewer',''),'review_note':f.get('review_note',''),'checks':f.get('checks',[]),'independent_verification':f.get('independent_verification'),'model':f.get('model',{})})
+        studies.append({'id':v['id'],'revision':v['revision'],'run_id':f['run_id'],'question_version_id':entry['question_version_id'],'current':valid,'created_at':v['created_at'],'analysis':analysis,'knowledge':used_knowledge,'reviewer':f.get('reviewer',''),'review_note':f.get('review_note',''),'teacher_review':f.get('teacher_review'),'checks':f.get('checks',[]),'independent_verification':f.get('independent_verification'),'model':f.get('model',{})})
         for mv in c.execute('SELECT v.* FROM corpus_mapping_versions v JOIN corpus_mappings m ON m.id=v.mapping_id WHERE m.analysis_version_id=? ORDER BY v.created_at DESC',(v['id'],)):
             snapshot=json.loads(mv['snapshot']);mapping=row(c,'corpus_mappings',mv['mapping_id']);state=mapping_json(c,mapping)
             effective=not state['stale'] and state['read_only'] and mapping['revision']==mv['revision']

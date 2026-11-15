@@ -112,3 +112,42 @@ it('shows blind-solve comparison and readable second solution without claiming t
  expect(screen.getByText('两份结果不一致，需核对分类遗漏')).toBeTruthy()
  expect(screen.getByText('第二份独立解答的目标')).toBeTruthy()
 })
+it('lists actionable AI information doubts but allows explicit teacher finalization without clearing them',async()=>{
+ mock();const base=vi.mocked(api).getMockImplementation()!
+ const advice={kind:'missing_information',path:'missing_information',title:'条件／信息疑问 1',message:'AI认为尚需明确横坐标是否为零',guidance:'核对原题条件；若AI误判可修正正文，若教师认可可直接确认定稿。'}
+ const current={...output,body:{...analysis,missing_information:[advice.message]},review_advisories:[advice]}
+ vi.mocked(api).mockImplementation(async(path,init)=>{
+  if(path==='/research-editor/runs/r')return {...task,outputs:[current]}
+  if(path==='/research-editor/runs/r/outputs/o/finalize')return {id:'approved-ai-advice'}
+  if(path==='/research-editor/versions/approved-ai-advice')return {id:'approved-ai-advice',output_id:'o',revision:2,snapshot:{analysis:current.body,checks:current.checks,question:questionBody,knowledge,run_id:'r',input:task.task,model:task.model,teacher_review:{decision:'approved',note:'教师已核查并认可当前研究稿',acknowledged_advisories:true,advisories:[advice]}}}
+  return base(path,init)
+ })
+ render(<ResearchManuscriptPage initialRunId="r" documents={[]} onDirtyChange={vi.fn()} openKnowledge={vi.fn()}/>);
+ await screen.findByText('AI核查意见 · 不自动阻断定稿')
+ expect(screen.getByText(advice.guidance,{exact:false})).toBeTruthy()
+ expect(screen.getByRole('button',{name:'定位相关正文'})).toBeTruthy()
+ fireEvent.click(screen.getByLabelText(/我已检查整份研究稿/))
+ expect((screen.getByRole('button',{name:'形成研究终稿'}) as HTMLButtonElement).disabled).toBe(false)
+ fireEvent.click(screen.getByRole('button',{name:'形成研究终稿'}))
+ await screen.findByText('教师决定：已核查并认可本研究稿。')
+ const sent=JSON.parse(vi.mocked(api).mock.calls.find(([p,i])=>p.endsWith('/finalize')&&i?.method==='POST')![1]!.body as string)
+ expect(sent.confirmed).toBe(true);expect(sent.teacher_review_note).toBeUndefined()
+})
+it('keeps teacher review notes on a failed finalization without requiring a separate note save',async()=>{
+ mock();const base=vi.mocked(api).getMockImplementation()!
+ vi.mocked(api).mockImplementation(async(path,init)=>{
+  if(path==='/research-editor/runs/r')return {...task,outputs:[{...output,review_advisories:[{kind:'critic',path:'approaches',title:'AI复核意见 1',message:'需核对非零条件',guidance:'对照原题确认或解释。'}]}]}
+  if(path.endsWith('/finalize'))throw Error('来源已变化，未写入过期终稿')
+  return base(path,init)
+ })
+ const dirty=vi.fn();render(<ResearchManuscriptPage initialRunId="r" documents={[]} onDirtyChange={dirty} openKnowledge={vi.fn()}/>);
+ const note=await screen.findByLabelText('教师审核说明（选填）');fireEvent.change(note,{target:{value:'原题已经明确非零，认可当前解法。'}})
+ await waitFor(()=>expect(dirty).toHaveBeenLastCalledWith(true))
+ fireEvent.click(screen.getByLabelText(/我已检查整份研究稿/))
+ expect((screen.getByRole('button',{name:'形成研究终稿'}) as HTMLButtonElement).disabled).toBe(false)
+ fireEvent.click(screen.getByRole('button',{name:'形成研究终稿'}))
+ await screen.findByText('Error: 来源已变化，未写入过期终稿')
+ expect(screen.getByDisplayValue('原题已经明确非零，认可当前解法。')).toBeTruthy()
+ const sent=JSON.parse(vi.mocked(api).mock.calls.find(([p,i])=>p.endsWith('/finalize')&&i?.method==='POST')![1]!.body as string)
+ expect(sent.teacher_review_note).toBe('原题已经明确非零，认可当前解法。')
+})
