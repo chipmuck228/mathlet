@@ -225,3 +225,25 @@ def test_migration_is_idempotent_and_does_not_change_question_finals(client,monk
     init_db();init_db()
     assert client.get(url).content==old
     with connect() as c:assert c.execute('SELECT count(*) FROM schema_migrations WHERE version=13').fetchone()[0]==1
+
+
+def test_condition_edits_keep_research_history_and_allow_new_current_study(client,monkeypatch):
+    from mathlet.research_models import QuestionBody
+    run,q,doc,blocks=start_study(client,monkeypatch);final=finalize_study(client,run)
+    current=client.get('/api/research/questions/'+q['question_id']).json()
+    body=QuestionBody.model_validate({k:v for k,v in current['payload'].items() if k in QuestionBody.model_fields}).model_dump()
+    body['diagram_description']='教师补充并核对的文字条件'
+    saved=client.put('/api/research/questions/'+q['question_id'],json=body|{'revision':current['revision']});assert saved.status_code==200,saved.text
+    target=next(x for x in client.get('/api/corpus/catalog').json()['questions'] if x['question_id']==q['question_id'])
+    assert not target['condition_confirmed'] and target['blockers']
+    assert target['runs'][0]['id']==run['id'] and target['runs'][0]['stale']
+    assert target['runs'][0]['finals'][0]['id']==final['id'] and target['runs'][0]['finals'][0]['stale']
+    fixed=client.post('/api/research/questions/'+q['question_id']+'/confirm',json={'revision':saved.json()['revision'],'reviewer':'测试教师','note':'确认补充后的完整条件','confirmed':True});assert fixed.status_code==200,fixed.text
+    target=next(x for x in client.get('/api/corpus/catalog').json()['questions'] if x['question_id']==q['question_id'])
+    assert target['condition_confirmed'] and not target['blockers'] and target['runs'][0]['id']==run['id']
+    new=client.post('/api/corpus/studies',json={'question_ids':[target['id']]}).json()['results'][0]
+    assert new['run_id']!=run['id']
+    monkeypatch.setattr(worker,'generate',independent_model);worker.run_one_knowledge()
+    target=next(x for x in client.get('/api/corpus/catalog').json()['questions'] if x['question_id']==q['question_id'])
+    assert len(target['runs'])==2
+    assert target['runs'][0]['id']==new['run_id'] and not target['runs'][0]['stale']

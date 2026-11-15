@@ -1,5 +1,5 @@
 import {afterEach,expect,it,vi} from 'vitest'
-import {cleanup,fireEvent,render,screen,waitFor} from '@testing-library/react'
+import {cleanup,fireEvent,render,screen,waitFor,within} from '@testing-library/react'
 import CorpusResearchPage from './CorpusResearchPage'
 import {api} from '@/lib/api'
 vi.mock('@/lib/api',()=>({api:vi.fn(),json:(method:string,body:unknown)=>({method,body:JSON.stringify(body)})}))
@@ -17,6 +17,7 @@ function mock(withMapping=false){vi.mocked(api).mockImplementation(async(path,in
  if(path==='/corpus/mappings'&&init?.method==='POST')return {results:[{id:'map'}]}
  throw Error('Unexpected '+path)
 })}
+function expand(title:string){fireEvent.click(within(screen.getByRole('region',{name:title})).getByRole('button',{name:'展开题目'}))}
 function page(onDirty=vi.fn()){render(<CorpusResearchPage onDirtyChange={onDirty}/>)}
 it('queues independent questions without any selected knowledge and blocks incomplete figure questions',async()=>{
  mock();page();await screen.findByText(/exam-V1.json/)
@@ -65,12 +66,12 @@ it('opens the exact blocked question inline, without a fallback to the first stu
   return base(path,init)
  })
  page();await screen.findByText(/exam-V1.json/);fireEvent.click(screen.getByRole('checkbox',{name:/合成卷一 · exam/}))
- fireEvent.click(screen.getByRole('button',{name:'在本页补充、确认本题条件'}))
+ expand('合成卷一 · 第2题');fireEvent.click(screen.getByRole('button',{name:'补充／编辑本题条件'}))
  await screen.findByRole('region',{name:'完整题目编辑'})
  expect(screen.getByDisplayValue('指定第二题正文')).toBeTruthy()
  expect(vi.mocked(api).mock.calls.some(([p])=>p==='/research/questions/exact-q2')).toBe(true)
  expect(vi.mocked(api).mock.calls.some(([p])=>p.startsWith('/research-editor/runs/'))).toBe(false)
- fireEvent.click(screen.getByRole('button',{name:'返回题库研究列表'}))
+ fireEvent.click(screen.getByRole('button',{name:'收起编辑区'}))
  await screen.findByText('有图题');expect((screen.getByRole('checkbox',{name:/合成卷一 · exam/}) as HTMLInputElement).checked).toBe(true)
 })
 it('reviews and finalizes the selected study inline and returns to the same selected exam',async()=>{
@@ -90,15 +91,15 @@ it('reviews and finalizes the selected study inline and returns to the same sele
   return base(path,init)
  })
  page();await screen.findByText(/exam-V1.json/);fireEvent.click(screen.getByRole('checkbox',{name:/合成卷一 · exam/}))
- fireEvent.click(screen.getByRole('button',{name:'打开研究稿／审核定稿'}))
+ expand('合成卷一 · 第1题');fireEvent.click(screen.getByRole('button',{name:'打开研究稿／审核定稿'}))
  await screen.findByRole('heading',{name:/第一题指定研究 · 研究工作稿/})
  expect(screen.queryByRole('combobox',{name:'已有研究'})).toBeNull()
  const confirmation=screen.getByLabelText(/我已检查整份研究稿/)
  fireEvent.click(confirmation);fireEvent.click(screen.getByRole('button',{name:'形成研究终稿'}))
  await screen.findByRole('heading',{name:/第一题指定研究 · 研究终稿/})
  expect(finalized).toBe(true)
- await waitFor(()=>expect((screen.getByRole('button',{name:'返回题库研究列表'}) as HTMLButtonElement).disabled).toBe(false))
- fireEvent.click(screen.getByRole('button',{name:'返回题库研究列表'}))
+ await waitFor(()=>expect((screen.getByRole('button',{name:'收起编辑区'}) as HTMLButtonElement).disabled).toBe(false))
+ fireEvent.click(screen.getByRole('button',{name:'收起编辑区'}))
  await screen.findByRole('checkbox',{name:/选择研究终稿/})
  expect((screen.getByRole('checkbox',{name:/合成卷一 · exam/}) as HTMLInputElement).checked).toBe(true)
  expect(vi.mocked(api).mock.calls.some(([p])=>p==='/research-editor/runs')).toBe(false)
@@ -107,10 +108,43 @@ it('protects unsaved edits in the exact question and offers explicit discard',as
  mock();const base=vi.mocked(api).getMockImplementation()!
  const target={id:'q2',revision:1,confirmed:false,stale:false,version_id:null,payload:{title:'待补第二题',statement:'第二题待修订',question_block_ids:[],answer_block_ids:[],answer_status:'absent',reference_answer:'',figure_status:'pending',diagram_description:'',region:'',year:'',number:'2',notes:'',assets:[],sources:[]}}
  vi.mocked(api).mockImplementation(async(path,init)=>path==='/corpus/catalog'?{...catalog,questions:catalog.questions.map(q=>({...q,question_id:'q2'}))}:path==='/research/questions/q2'?target:path==='/documents'?[]:base(path,init))
- page();await screen.findByText(/exam-V1.json/);fireEvent.click(screen.getByRole('checkbox',{name:/合成卷一 · exam/}));fireEvent.click(screen.getByRole('button',{name:'在本页补充、确认本题条件'}))
+ page();await screen.findByText(/exam-V1.json/);fireEvent.click(screen.getByRole('checkbox',{name:/合成卷一 · exam/}));expand('合成卷一 · 第2题');fireEvent.click(screen.getByRole('button',{name:'补充／编辑本题条件'}))
  const input=await screen.findByLabelText('提取结果 完整题干');fireEvent.change(input,{target:{value:'未保存的条件修订'}})
- await waitFor(()=>expect((screen.getByRole('button',{name:'返回题库研究列表'}) as HTMLButtonElement).disabled).toBe(true))
- fireEvent.click(screen.getByRole('button',{name:'放弃未保存编辑并返回'}))
- await screen.findByRole('button',{name:'在本页补充、确认本题条件'})
+ await waitFor(()=>expect((screen.getByRole('button',{name:'收起编辑区'}) as HTMLButtonElement).disabled).toBe(true))
+ fireEvent.click(screen.getByRole('button',{name:'放弃未保存编辑'}))
+ await screen.findByRole('button',{name:'补充／编辑本题条件'})
  expect(vi.mocked(api).mock.calls.some(([,i])=>i?.method==='PUT')).toBe(false)
+})
+it('keeps condition editing available after saving and connects confirmation to single-question generation',async()=>{
+ mock();const base=vi.mocked(api).getMockImplementation()!
+ let target={id:'q2',revision:1,confirmed:false,stale:false,version_id:null as string|null,payload:{title:'第二题',statement:'第二题原文',question_block_ids:['b2'],answer_block_ids:[],answer_status:'absent',reference_answer:'',figure_status:'pending',diagram_description:'',region:'',year:'',number:'2',notes:'',assets:[],sources:[]}}
+ let generated=false
+ vi.mocked(api).mockImplementation(async(path,init)=>{
+  if(path==='/corpus/catalog')return {...catalog,questions:[{...catalog.questions[1],question_id:'q2',statement:target.payload.statement,blockers:target.confirmed?[]:['保存后仍需确认完整性'],runs:generated?[{...run,id:'new-run',status:'queued',finals:[]}]:[]}]}
+  if(path==='/documents')return []
+  if(path==='/research/questions/q2'&&init?.method==='PUT'){target={...target,revision:target.revision+1,confirmed:false,payload:{...target.payload,...JSON.parse(init.body as string)}};return target}
+  if(path==='/research/questions/q2')return target
+  if(path==='/research/questions/q2/confirm'){target={...target,confirmed:true,version_id:'qv2'};return target}
+  if(path==='/corpus/studies'){generated=true;return {results:[{run_id:'new-run',status:'queued'}]}}
+  if(path==='/editor/profiles')return {active:'deepseek',profiles:[]}
+  if(path==='/research-editor/runs/new-run')return {id:'new-run',revision:1,status:'queued',stale:false,outputs:[],title:'第二题',task:{},calls:[],model:{model:'mock'}}
+  if(path==='/research-editor/runs/new-run/discussions')return []
+  return base(path,init)
+ })
+ page();await screen.findByText(/exam-V1.json/);fireEvent.click(screen.getByRole('checkbox',{name:/合成卷一 · exam/}));expand('合成卷一 · 第2题')
+ fireEvent.click(screen.getByRole('button',{name:'补充／编辑本题条件'}));await screen.findByLabelText('提取结果 完整题干')
+ fireEvent.change(screen.getByLabelText('提取结果 图形文字条件'),{target:{value:'已核对图形条件'}})
+ fireEvent.change(screen.getByLabelText('图形条件状态'),{target:{value:'described'}})
+ fireEvent.click(screen.getByRole('button',{name:'保存题目草稿'}))
+ await screen.findByText('条件修改已保存，尚需勾选完整性确认；也可继续编辑。')
+ expect((screen.getByRole('button',{name:'生成本题研究稿'}) as HTMLButtonElement).disabled).toBe(true)
+ await waitFor(()=>expect((screen.getByRole('button',{name:'收起编辑区'}) as HTMLButtonElement).disabled).toBe(false))
+ fireEvent.click(screen.getByRole('button',{name:'收起编辑区'}));fireEvent.click(screen.getByRole('button',{name:'补充／编辑本题条件'}))
+ await screen.findByDisplayValue('已核对图形条件')
+ fireEvent.click(screen.getByLabelText(/我已检查本题题干/));fireEvent.click(screen.getByRole('button',{name:'保存并确认完整题目'}))
+ await waitFor(()=>expect((screen.getByRole('button',{name:'生成本题研究稿'}) as HTMLButtonElement).disabled).toBe(false))
+ fireEvent.click(screen.getByRole('button',{name:'生成本题研究稿'}))
+ await screen.findByRole('button',{name:'打开研究稿／审核定稿'})
+ expect(generated).toBe(true)
+ expect(screen.queryByRole('checkbox',{name:/选择研究终稿/})).toBeNull()
 })

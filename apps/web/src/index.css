@@ -61,3 +61,20 @@ body{--keyboard-zindex:2100}
 .review-column-title .exam-warning-count{color:#87480d;font-weight:600}
 .extraction-marker,.reading-formula-error{color:#75400b;background:#ffe3a6;padding:2px 4px;border-radius:2px;box-decoration-break:clone;-webkit-box-decoration-break:clone;print-color-adjust:exact}
 .reading-formula-error{border-bottom:2px dotted #b76b12}
+
+/* Question status is conveyed by both color and readable labels. */
+.corpus-question{border-left:4px solid var(--corpus-status-border);background:var(--corpus-status-bg)}
+.corpus-question .section-heading{align-items:center;flex-wrap:wrap}
+.corpus-question .section-heading label{flex:1;margin:0}
+.corpus-state-label{font-size:12px;font-weight:600;color:var(--corpus-status-text);background:var(--corpus-status-badge);padding:3px 9px;border-radius:4px}
+.corpus-state-conditions{--corpus-status-border:#b97112;--corpus-status-bg:#fff9ed;--corpus-status-badge:#ffebc6;--corpus-status-text:#77440a}
+.corpus-state-ready{--corpus-status-border:#8a948d;--corpus-status-bg:#f6f7f4;--corpus-status-badge:#e5e9e5;--corpus-status-text:#445449}
+.corpus-state-running{--corpus-status-border:#477bad;--corpus-status-bg:#f1f7fd;--corpus-status-badge:#dcecff;--corpus-status-text:#285580}
+.corpus-state-review{--corpus-status-border:#8970a4;--corpus-status-bg:#f8f4fc;--corpus-status-badge:#eae0f5;--corpus-status-text:#60457c}
+.corpus-state-final{--corpus-status-border:#468163;--corpus-status-bg:#f2f9f1;--corpus-status-badge:#dfeddb;--corpus-status-text:#315e42}
+.corpus-state-failed{--corpus-status-border:#b4564d;--corpus-status-bg:#fff5f2;--corpus-status-badge:#f8e0db;--corpus-status-text:#8c3931}
+.corpus-run{padding:12px 0;border-bottom:1px solid var(--border)}
+.corpus-question-editor{margin-top:20px;padding-top:16px;border-top:1px solid var(--border);min-width:0}
+.corpus-question-editor .manuscript-grid{grid-template-columns:minmax(150px,.6fr) minmax(0,1.9fr) minmax(230px,1fr)}
+@media(max-width:1100px){.corpus-question-editor .manuscript-grid{grid-template-columns:1fr}.corpus-question-editor .manuscript-list,.corpus-question-editor .manuscript-chat{position:static;max-height:none}}
+.corpus-status-legend{display:flex;flex-wrap:wrap;gap:10px;margin:16px 0}

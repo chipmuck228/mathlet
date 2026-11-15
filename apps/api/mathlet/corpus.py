@@ -41,12 +41,12 @@ def catalog():
     from .exam_extraction import version_current as exam_current
     with connect() as c:
         exams=[];questions=[];runs_by_question={}
-        for entry in c.execute('SELECT * FROM corpus_entries'):
+        for entry in c.execute('SELECT e.* FROM corpus_entries e JOIN knowledge_runs k ON k.id=e.run_id ORDER BY k.created_at DESC,e.rowid DESC'):
             run=row(c,'knowledge_runs',entry['run_id']);meta=json.loads(run['input_json'])['research_task']
             finals=[dict(v) for v in c.execute('SELECT v.id,v.created_at FROM research_analysis_versions v JOIN research_outputs o ON o.id=v.output_id WHERE o.run_id=? ORDER BY v.revision DESC',(run['id'],))]
             output=c.execute('SELECT body FROM research_outputs WHERE run_id=? ORDER BY rowid DESC LIMIT 1',(run['id'],)).fetchone()
             body=json.loads(output['body']) if output else {}
-            runs_by_question.setdefault(entry['question_version_id'],[]).append({'id':run['id'],'status':run['status'],'error':run['error'],'revision':run['revision'],'problem_types':body.get('problem_types',[]),'identified_names':[x['name'] for x in body.get('identified_knowledge',[])],'stale':not sources_current(c,meta),'finals':[v|{'stale':not analysis_current(c,v['id'])} for v in finals]})
+            runs_by_question.setdefault(row(c,'research_question_versions',entry['question_version_id'])['question_id'],[]).append({'id':run['id'],'status':run['status'],'error':run['error'],'revision':run['revision'],'question_version_id':entry['question_version_id'],'problem_types':body.get('problem_types',[]),'identified_names':[x['name'] for x in body.get('identified_knowledge',[])],'stale':not sources_current(c,meta),'finals':[v|{'stale':not analysis_current(c,v['id'])} for v in finals]})
         for v in c.execute('SELECT v.* FROM exam_document_heads h JOIN exam_extraction_versions v ON v.id=h.version_id ORDER BY v.created_at DESC'):
             f=json.loads(v['snapshot']);stale=not exam_current(c,v['id'])
             exams.append({'id':v['id'],'title':f['title'],'filename':v['filename'],'category':f['source']['category'],'stale':stale,'count':len(f['questions'])})
@@ -54,17 +54,19 @@ def catalog():
                 version_id=q.get('question_version_id');blockers=[];frozen=None
                 if stale:blockers.append('原文或试卷终稿已变化')
                 current=c.execute('SELECT * FROM research_questions WHERE id=?',(q.get('research_question_id'),)).fetchone() if q.get('research_question_id') else None
-                if current and current['confirmed_revision']==current['revision']:
-                    confirmed=c.execute('SELECT id FROM research_question_versions WHERE question_id=? AND revision=?',(current['id'],current['revision'])).fetchone()
-                    if confirmed:version_id=confirmed['id']
-                if version_id:
-                    version=row(c,'research_question_versions',version_id);current=row(c,'research_questions',version['question_id']);frozen=json.loads(version['snapshot'])
-                    if current['revision']!=version['revision'] or current['confirmed_revision']!=version['revision'] or not question_current(c,current):blockers.append('完整题目已修订，请重新确认题目')
-                    if frozen['figure_status']=='pending':blockers.append('必要图形条件尚未文字核对，请在题目与研究中补充')
+                confirmed_current=bool(current) and current['confirmed_revision']==current['revision'] and question_current(c,current)
+                if current:
+                    frozen=json.loads(current['payload'])
+                    current_version=c.execute('SELECT id FROM research_question_versions WHERE question_id=? AND revision=?',(current['id'],current['revision'])).fetchone() if confirmed_current else None
+                    version_id=current_version['id'] if current_version else None
+                    if not confirmed_current:blockers.append('题目修改已保存，但尚未确认完整性；请继续确认本题条件')
+                    if frozen['figure_status']=='pending':blockers.append('必要图形文字条件尚未核对')
                     try:validate_text(frozen['statement'])
                     except HTTPException as exc:blockers.append(str(exc.detail))
-                else:blockers.append(q.get('research_note') or '题目尚未形成可研究的完整版本，请在题目与研究中补充条件并确认')
-                questions.append({'id':v['id']+':'+q['key'],'exam_id':v['id'],'title':f['title']+' · '+(q['number'] or '未编号题'),'number':q['number'],'statement':frozen['statement'] if frozen else q['question_text'],'question_version_id':version_id,'question_id':current['id'] if current else q.get('research_question_id'),'blockers':blockers,'fingerprint':fingerprint(frozen) if frozen else '', 'runs':runs_by_question.get(version_id,[])})
+                else:
+                    version_id=None
+                    blockers.append(q.get('research_note') or '题目尚未形成可研究的完整版本，请先整理原题')
+                questions.append({'id':v['id']+':'+q['key'],'exam_id':v['id'],'title':f['title']+' · '+(q['number'] or '未编号题'),'number':q['number'],'statement':frozen['statement'] if frozen else q['question_text'],'question_version_id':version_id,'question_id':current['id'] if current else q.get('research_question_id'),'condition_confirmed':confirmed_current,'blockers':blockers,'fingerprint':fingerprint(frozen) if frozen else '', 'runs':runs_by_question.get(current['id'],[]) if current else []})
         counts={}
         for q in questions:
             if q['fingerprint']:counts[q['fingerprint']]=counts.get(q['fingerprint'],0)+1
