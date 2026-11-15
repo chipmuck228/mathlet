@@ -11,6 +11,7 @@ export default function ResearchBodyEditor({output,knowledge,readOnly,onDraft,on
  function replace(path:string[],next:unknown){const cloned=structuredClone(value);let at=cloned;for(const key of path.slice(0,-1))at=at[key] as Record<string,unknown>;at[path[path.length-1]]=next;setValue(cloned)}
  function name(ref:string){const item=knowledge.items.find(i=>i.ref===ref);return item?`${item.unit_title} / ${item.title}`:ref}
  function template(key:string):unknown{
+  if(key==='identified_knowledge')return {name:'新知识',role:'support',reason:'',conditions:''}
   if(key==='assessed_points')return {name:'新考察点',knowledge_refs:[],evidence:''}
   if(key==='knowledge_breakdown')return {ref:knowledge.items[0]?.ref||'',role:'',conditions:''}
   if(key==='steps')return {action:'',reason:'',knowledge_refs:[]}
@@ -20,9 +21,12 @@ export default function ResearchBodyEditor({output,knowledge,readOnly,onDraft,on
  }
  function field(node:unknown,path:string[]):ReactNode{
   const key=path[path.length-1]||'';const ref=key==='ref'||path.includes('knowledge_refs')
+  if(Array.isArray(node)&&!knowledge.items.length&&'identified_knowledge' in value&&['knowledge_breakdown','knowledge_refs'].includes(key))return <p className="small muted">知识终稿关联稍后在题库研究中单独完成。</p>
   if(Array.isArray(node))return <div>{node.map((child,i)=><div key={i} className="research-array-item">{field(child,[...path,String(i)])}{editing&&<Button variant="ghost" disabled={saving} onClick={()=>replace(path,node.filter((_,j)=>i!==j))}>移除此项</Button>}</div>)}{editing&&<Button variant="outline" disabled={saving} onClick={()=>replace(path,[...node,template(key)])}>增加{labels[key]||'一项'}</Button>}{!node.length&&!editing&&<p className="small muted">无</p>}</div>
   if(node&&typeof node==='object')return <div>{Object.entries(node).map(([k,v])=><div key={k}><label>{labels[k]||k}</label>{field(v,[...path,k])}</div>)}</div>
   const text=String(node??'')
+  if(editing&&key==='role'&&path.includes('identified_knowledge'))return <select aria-label="知识作用" value={text} onChange={e=>replace(path,e.target.value)}><option value="primary">主要考察</option><option value="support">辅助知识</option><option value="method">思考方法</option><option value="check">结果检验</option></select>
+  if(!editing&&key==='role'&&path.includes('identified_knowledge'))return <p>{{primary:'主要考察',support:'辅助知识',method:'思考方法',check:'结果检验'}[text]||text}</p>
   if(editing&&ref)return <select aria-label="研究知识引用" disabled={saving} value={text} onChange={e=>replace(path,e.target.value)}>{knowledge.items.map(i=><option key={i.ref} value={i.ref}>{i.unit_title} / {i.title}</option>)}</select>
   if(editing&&key!=='id')return <MathBlockEditor block={mathBlock(output.id+'-'+path.join('-'),text,labels[key]||labels[path[path.length-2]]||key,output.revision)} text={text} disabled={saving} onFocus={()=>{}} onChange={text=>replace(path,text)}/>
   return <div className="block-reading"><ReadableMath text={ref?name(text):text}/></div>

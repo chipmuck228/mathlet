@@ -427,6 +427,9 @@ app.include_router(exam_router)
 from .exam_formulas import router as exam_formula_router
 app.include_router(exam_formula_router)
 
+from .corpus import router as corpus_router
+app.include_router(corpus_router)
+
 web = ROOT / "apps" / "web" / "dist"
 if web.is_dir():
     app.mount("/", StaticFiles(directory=web, html=True), name="web")

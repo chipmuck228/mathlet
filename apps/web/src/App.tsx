@@ -4,6 +4,7 @@ import PlanningPage from "./PlanningPage"
 import TeachingPage from "./TeachingPage"
 import ResearchPage from "./ResearchManuscriptPage"
 import PaperResearchPage from "./PaperResearchPage"
+import CorpusResearchPage from "./CorpusResearchPage"
 import KnowledgePage from "./EditorialKnowledgePage"
 import SourceReview from "./ExamSourceReview"
 import LegacySourceReview from "./SourceReview"
@@ -18,6 +19,7 @@ const stages = [
   { id: "knowledge", label: "知识与关系", icon: BookOpen },
   { id: "research", label: "题目与研究", icon: BookOpen },
   { id: "paper", label: "整卷研究", icon: BookOpen },
+  { id: "corpus", label: "题库研究", icon: BookOpen },
   { id: "tasks", label: "任务与生成", icon: GitBranch },
   { id: "editor", label: "编辑与评审", icon: MessageSquare },
   { id: "preview", label: "小册子预览", icon: BookOpen },
@@ -93,6 +95,7 @@ export default function App() {
   const [requestedKnowledgeUnit,setRequestedKnowledgeUnit]=useState("")
   const [planningDirty,setPlanningDirty]=useState(false)
   const [researchDirty,setResearchDirty]=useState(false)
+  const [corpusDirty,setCorpusDirty]=useState(false)
   const [teachingDirty,setTeachingDirty]=useState(false)
   const [paperDirty,setPaperDirty]=useState(false),[requestedResearchRun,setRequestedResearchRun]=useState("")
   const [knowledgeDirty, setKnowledgeDirty] = useState(false)
@@ -152,6 +155,7 @@ export default function App() {
     } catch (e) { setMessage(String(e)) } finally { setBusy(false) }
   }
   function navigate(next: string) {
+    if (stage === "corpus" && corpusDirty && next !== stage && !window.confirm("有未保存的知识关联或思路卡修改，离开将丢弃。继续？")) return
     if (stage === "tasks" && teachingDirty && next !== stage && !window.confirm("有未保存的应用映射或训练修改，离开会丢弃。继续？")) return
     if (stage === "planning" && planningDirty && next !== stage && !window.confirm("有未保存的规划修改，离开会丢弃。继续？")) return
     if (stage === "paper" && paperDirty && next !== stage && !window.confirm("有未保存的整卷修改，离开将丢弃。继续？")) return
@@ -170,6 +174,7 @@ export default function App() {
       <main><div className="intro"><div><p className="eyebrow">理解知识 · 发现连接 · 建立思路</p><h1>{({ materials: "从可信资料开始。", sources: "让每个条件都准确。", planning: "把知识组织成复习路径。", knowledge: "从知识草案到教师确认。", research:"从完整题目建立解题思路。", tasks: "把生成过程留在记录里。", editor: "让思路经得起检查。", preview: "回到学生的阅读视角。", releases: "交付一个确定的版本。" } as Record<string, string>)[stage]}</h1></div><Button variant="outline" size="sm" onClick={() => void refresh()}><RefreshCw />刷新列表</Button></div>
       {!online && <div className="notice" role="alert">尚未连接 API。请按 README 启动 FastAPI（8000）和 Worker；前端通过 Vite 代理访问。</div>}
       <Message value={message} />
+      {stage === "corpus" && <CorpusResearchPage onDirtyChange={setCorpusDirty} onOpenRun={id=>{setRequestedResearchRun(id);setStage("research")}} />}
       {stage === "paper" && <PaperResearchPage onDirtyChange={setPaperDirty} onOpenRun={id=>{setRequestedResearchRun(id);setStage("research")}} />}
       {stage === "research" && <ResearchPage initialRunId={requestedResearchRun} documents={documents} onDirtyChange={setResearchDirty} openKnowledge={()=>setStage("knowledge")} />}
       {stage === "knowledge" && <KnowledgePage onOpenResearch={()=>setStage("research")} initialUnitId={requestedKnowledgeUnit} onDirtyChange={setKnowledgeDirty} />}

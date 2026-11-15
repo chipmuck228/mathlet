@@ -103,3 +103,12 @@ it('opens the exact research run selected from the paper workflow instead of the
  expect(vi.mocked(api).mock.calls.some(([p])=>p==='/research-editor/runs/selected')).toBe(true)
  expect(vi.mocked(api).mock.calls.some(([p])=>p==='/research-editor/runs/r')).toBe(false)
 })
+it('shows blind-solve comparison and readable second solution without claiming teacher approval',async()=>{
+ mock();const base=vi.mocked(api).getMockImplementation()!
+ vi.mocked(api).mockImplementation(async(path,init)=>path==='/research-editor/runs/r'?{...task,independent_verification:{second_solution:{...analysis,goals:['第二份独立解答的目标']},comparison:{verdict:'disagrees',summary:'两份结果不一致，需核对分类遗漏',issues:[]},teacher_verified:false}}:base(path,init))
+ render(<ResearchManuscriptPage initialRunId="r" documents={[]} onDirtyChange={vi.fn()} openKnowledge={vi.fn()}/>);
+ await screen.findByText('两次独立求解与比较')
+ expect(screen.getByText('存在分歧，仍需教师核验。')).toBeTruthy()
+ expect(screen.getByText('两份结果不一致，需核对分类遗漏')).toBeTruthy()
+ expect(screen.getByText('第二份独立解答的目标')).toBeTruthy()
+})

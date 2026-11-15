@@ -31,7 +31,10 @@ def init_research_editor(c):
     ''')
 
 
-def analysis_schema(meta):return AuthoringAnalysis if meta.get('workflow')=='manuscript-v1' else Analysis
+def analysis_schema(meta):
+    from .corpus_models import IndependentAnalysis
+    if meta.get('workflow')=='independent-v1':return IndependentAnalysis
+    return AuthoringAnalysis if meta.get('workflow')=='manuscript-v1' else Analysis
 
 
 def safe_question(frozen):
@@ -87,6 +90,8 @@ def check_analysis(body,meta,context,final=False):
 def manuscript(c,run):
     if json.loads(run['input_json']).get('research_task',{}).get('kind')!='analysis':raise HTTPException(404,'单题研究稿不存在')
     data=task_json(c,run);meta=data['task'];context=row(c,'research_contexts',meta['context_id'])
+    verification=c.execute('SELECT payload FROM independent_reviews WHERE run_id=?',(run['id'],)).fetchone()
+    data['independent_verification']=json.loads(verification['payload']) if verification else None
     data['knowledge']=json.loads(context['snapshot'])
     data['question']=json.loads(row(c,'research_question_versions',meta['question_version_id'])['snapshot'])
     data['title']=data['question']['title']
@@ -212,6 +217,8 @@ def finalize_manuscript(run_id:str,output_id:str,body:Finalize):
         c.execute('UPDATE knowledge_runs SET revision=revision+1,updated_at=? WHERE id=?',(now(),run_id))
         parent=c.execute('SELECT parent_version FROM research_manuscripts WHERE run_id=?',(run_id,)).fetchone()
         snapshot={'analysis':valid,'checks':json.loads(output['checks']),'reviewer':'本机教师整稿确认','review_note':'整份单题研究稿确认','question':json.loads(row(c,'research_question_versions',meta['question_version_id'])['snapshot']),'knowledge':json.loads(context['snapshot']),'model':json.loads(run['model_json']),'run_id':run_id,'run_revision':run['revision']+1,'input':meta,'graph':json.loads(row(c,'research_graph_versions',meta['graph_version_id'])['snapshot']) if meta.get('graph_version_id') else None,'created_at':now(),'editorial':{'whole_manuscript_confirmed':True,'parent_version':parent['parent_version'] if parent else None,'advisory_relations_teacher_verified':False}}
+        verification=c.execute('SELECT payload FROM independent_reviews WHERE run_id=?',(run_id,)).fetchone()
+        if verification:snapshot['independent_verification']=json.loads(verification['payload'])
         key=uid();c.execute('INSERT INTO research_analysis_versions VALUES(?,?,?,?,?)',(key,output_id,output['revision']+1,packed(snapshot),now()))
         return {'id':key,'snapshot':snapshot}
 
@@ -229,6 +236,8 @@ def revise_version(version_id:str):
         c.execute('INSERT INTO knowledge_units(id,title,chapters,target,notes,origin,created_at) VALUES(?,?,?,?,?,?,?)',(unit_id,frozen['question']['title'],'[]','单题研究','',packed({'internal_research':True}),now()))
         c.execute("INSERT INTO knowledge_runs(id,unit_id,input_revision,input_json,model_json,status,stage,created_at,updated_at) VALUES(?,?,?,?,?,'completed','completed',?,?)",(run_id,unit_id,1,packed(snapshot),packed(frozen['model']),now(),now()))
         c.execute('INSERT INTO research_manuscripts(run_id,parent_version) VALUES(?,?)',(run_id,version_id))
+        c.execute('INSERT OR IGNORE INTO corpus_entries SELECT ?,question_version_id,exam_version_id FROM corpus_entries WHERE run_id=?',(run_id,frozen['run_id']))
+        if frozen.get('independent_verification'):c.execute('INSERT INTO independent_reviews VALUES(?,?)',(run_id,packed(frozen['independent_verification'])))
         c.execute('INSERT OR IGNORE INTO paper_item_runs(item_id,run_id) SELECT item_id,? FROM paper_item_runs WHERE run_id=?',(run_id,frozen['run_id']))
         c.execute('UPDATE paper_items SET run_id=? WHERE run_id=?',(run_id,frozen['run_id']))
         c.execute("INSERT INTO research_outputs(id,run_id,context_id,kind,body,original_body,checks) VALUES(?,?,?,'analysis',?,?,?)",(uid(),run_id,meta['context_id'],packed(frozen['analysis']),packed(frozen['analysis']),packed(frozen['checks'])))

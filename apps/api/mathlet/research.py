@@ -242,6 +242,12 @@ def retry(run_id:str,body:Retry):
         c.execute('BEGIN IMMEDIATE');run=row(c,'knowledge_runs',run_id);revision(run,body.revision)
         if not json.loads(run['input_json']).get('research_task'):raise HTTPException(404,'研究任务不存在')
         if run['status'] not in {'failed','interrupted'} or not sources_current(c,json.loads(run['input_json'])['research_task']):raise HTTPException(409,'任务不可重试或依据已过期')
+        if json.loads(run['input_json'])['research_task'].get('workflow')=='independent-v1':
+            config=json.loads(run['model_json']);completed={x['step'] for x in c.execute("SELECT step FROM knowledge_calls WHERE run_id=? AND status IN ('succeeded','revalidated')",(run_id,))}
+            count,reserved=c.execute('SELECT count(*),coalesce(sum(reserved_tokens),0) FROM knowledge_calls WHERE run_id=?',(run_id,)).fetchone()
+            remaining=[tokens for step,tokens in [('independent:solve',8000),('independent:blind-solve',8000),('independent:compare',3000)] if step not in completed]
+            config.update(max_calls=max(config['max_calls'],count+len(remaining)),output_token_budget=max(config['output_token_budget'],reserved+sum(remaining)))
+            c.execute('UPDATE knowledge_runs SET model_json=? WHERE id=?',(packed(config),run_id))
         c.execute("UPDATE knowledge_runs SET status='queued',error='',revision=revision+1,updated_at=? WHERE id=?",(now(),run_id))
         return task_json(c,row(c,'knowledge_runs',run_id))
 
