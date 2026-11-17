@@ -1,6 +1,7 @@
 """Coloured, print-safe student reader. Presentation copy never replaces source mathematics."""
 import html
-from .formulas import render_text,render_latex
+from .formulas import render_latex
+from .reader_text import render_reader_text as render_text,goal_text
 from .reader_theme import CSS,icon
 from .student_presentation import current_presentation
 from .student_language import aliases,public_text,problems
@@ -25,7 +26,7 @@ def render_reader(snapshot):
     def band(title,content,tone='blue',symbol='idea'):return '<div class="band tone-'+tone+'"><h4>'+icon(symbol)+html.escape(title)+'</h4>'+content+'</div>'
     def chapter(number,title,anchor):return '<div class="chapter" id="'+anchor+'"><span class="chapter-number">0'+str(number)+'</span><h2>'+html.escape(title)+'</h2></div>'
     def images(q):return ''.join('<img alt="原题配图" src="'+html.escape(a['data_url'],quote=True)+'">' for a in q['assets'] if a.get('data_url','').startswith('data:image/png;base64,'))
-    parts=['<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>'+html.escape(public(b['title']))+'</title><style>'+CSS+'</style></head><body><header class="cover"><p class="eyebrow">MATHLET / 数学复习小册子 · '+('教师审定复习单元' if confirmed else '未审定草案，仅供核查')+'</p><h1>'+html.escape(public(b['title']))+'</h1>'+text(p['introduction'] if p else learner(b['introduction'],'先看看下面的知识，再试着找出题目给了什么条件、要你求什么。'))+'<div class="goals"><h4>'+icon('check')+' 读完以后，试试这些事</h4>'+listing(p['goals'] if p else [x for x in (learner(g) for g in b['goals']) if x] or ['试着用自己的话说清概念和条件。','做完题后，说说每一步为什么成立。'])+'</div><p class="muted text">先自己想一想，卡住了再打开提示。做完后再翻到后面，对照答案和思考过程。</p><nav class="reading-route"><a href="#basics">先懂知识</a><a href="#cards">找到连接</a><a href="#practice">动笔试试</a><a href="#solutions">对照思路</a></nav></header>'+chapter(1,'先把知识弄明白','basics')]
+    parts=['<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>'+html.escape(public(b['title']))+'</title><style>'+CSS+'</style></head><body><header class="cover"><p class="eyebrow">MATHLET / 数学复习小册子 · '+('教师审定复习单元' if confirmed else '未审定草案，仅供核查')+'</p><h1>'+html.escape(public(b['title']))+'</h1>'+text(p['introduction'] if p else learner(b['introduction'],'先看看下面的知识，再试着找出题目给了什么条件、要你求什么。'))+'<div class="goals"><h4>'+icon('check')+' 读完以后，试试这些事</h4>'+listing([goal_text(g) for g in p['goals']] if p else [x for x in (learner(g) for g in b['goals']) if x] or ['试着用自己的话说清概念和条件。','做完题后，说说每一步为什么成立。'])+'</div><p class="muted text">先自己想一想，卡住了再打开提示。做完后再翻到后面，对照答案和思考过程。</p><nav class="reading-route"><a href="#basics">先懂知识</a><a href="#cards">找到连接</a><a href="#practice">动笔试试</a><a href="#solutions">对照思路</a></nav></header>'+chapter(1,'先把知识弄明白','basics')]
     for index,k in enumerate(know['items']):
         v=k['body'];copy=copies.get(k['ref']);parts.append('<article class="knowledge" id="'+anchors[k['ref']]+'"><div class="entry-head"><span class="entry-number">K'+str(index+1).zfill(2)+'</span><h3>'+html.escape(public(k['title']))+'</h3></div>')
         if copy:parts.append(band('先这样理解',text(copy['plain_explanation']),'blue','book'))
