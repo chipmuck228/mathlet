@@ -65,14 +65,21 @@ def run_review_unit(run,config,snapshot):
         composition={'title':know['title']+' · 基础复习','introduction':'本次题库尚未找到有充分依据的相关代表题。先回顾以下已审定基础知识，后续补充相关研究终稿后再编制训练。','goals':['理解概念、性质及其成立条件，能解释正例与易错点。'],'training':[]}
     body=composition|{'mappings':mappings,'selected_analysis_ids':selected,'cards':cards['cards'],'summary':cards['summary']}
     with connect() as c:checked(c,meta,body)
+    stage(run,meta,'unit:presentation')
+    from .student_presentation import generate_presentation
+    presentation_issues=[]
+    try:body['presentation']=generate_presentation(run,config,body,know,lambda:stage(run,meta,'unit:presentation'))
+    except ValueError as exc:
+        body['presentation']=None
+        presentation_issues=[{'section':'presentation','message':'学生表达Agent未完成：'+str(exc),'guidance':'当前草案保留原知识与训练，可正常预览和审核。可使用优化学生表达入口单独重试，不必重新研究题目。'}]
     stage(run,meta,'unit:review')
-    review=call(run,config,'unit:review','复核新归纳的映射、思路卡和训练，尤其知识连接的成立条件和例子、新编题的条件、答案、推理、提示梯度及引用是否相互支持。勿对已有教师审核记录或随机ID提出数学质疑。每项指出具体问题，并给可执行的处理建议guidance；教师可以修改或说明不采纳，不自动否决。section必须为正文中的栏目名。未发现疑问不等于数学已证明。返回结构：'+packed(Review.model_json_schema()),{'knowledge':know,'reviewed_studies':[compact(s) for s in chosen.values()],'candidate':body|{'mappings':[m for m in mappings if m['analysis_id'] in chosen]}},3000,Review.model_validate,system_prompt=SYSTEM,prompt_version='review-unit-v1')
+    review=call(run,config,'unit:review','复核新归纳的映射、思路卡和训练，尤其presentation学生表达是否与原知识一致、有无夸大或漏条件，知识连接的成立条件和例子、新编题的条件、答案、推理、提示梯度及引用是否相互支持。勿对已有教师审核记录或随机ID提出数学质疑。每项指出具体问题，并给可执行的处理建议guidance；教师可以修改或说明不采纳，不自动否决。section必须为正文中的栏目名。未发现疑问不等于数学已证明。返回结构：'+packed(Review.model_json_schema()),{'knowledge':know,'reviewed_studies':[compact(s) for s in chosen.values()],'candidate':body|{'mappings':[m for m in mappings if m['analysis_id'] in chosen]}},3000,Review.model_validate,system_prompt=SYSTEM,prompt_version='review-unit-v1')
     with connect() as c:
         c.execute('BEGIN IMMEDIATE')
         if not unit_current(c,meta):raise ValueError('来源在生成期间变化，未写入过期草案')
         checked(c,meta,body)
         if row(c,'review_units',run['id'])['payload']:raise ValueError('已有教师稿件，不覆盖')
-        c.execute('UPDATE review_units SET payload=?,original_payload=?,checks=? WHERE id=?',(packed(body),packed(body),packed(review.model_dump()['issues']),run['id']))
+        c.execute('UPDATE review_units SET payload=?,original_payload=?,checks=? WHERE id=?',(packed(body),packed(body),packed(presentation_issues+review.model_dump()['issues']),run['id']))
         c.execute("UPDATE knowledge_runs SET status='completed',stage='completed',revision=revision+1,updated_at=? WHERE id=?",(now(),run['id']))
 
 def run_discussion(run,config,snapshot):

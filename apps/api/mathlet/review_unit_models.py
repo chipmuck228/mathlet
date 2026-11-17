@@ -2,6 +2,7 @@
 from typing import Literal
 from pydantic import Field
 from .research_models import Strict
+from .student_presentation import Presentation
 
 class Evidence(Strict):
     analysis_id:str
@@ -61,12 +62,13 @@ class Composition(Strict):
     goals:list[str]=Field(min_length=1,max_length=12)
     training:list[Training]=Field(max_length=16)
 class UnitBody(Composition):
+    presentation:Presentation|None=None
     mappings:list[Mapping]
     selected_analysis_ids:list[str]=Field(max_length=8)
     cards:list[Card]=Field(max_length=5)
     summary:str=Field(min_length=1,max_length=4000)
 class ReviewIssue(Strict):
-    section:Literal['introduction','goals','mappings','knowledge_connections','cards','training','summary']
+    section:Literal['introduction','goals','mappings','knowledge_connections','presentation','cards','training','summary']
     message:str=Field(min_length=1,max_length=3000)
     guidance:str=Field(min_length=1,max_length=3000)
 class Review(Strict):
@@ -91,6 +93,10 @@ def init_review_units(c):
       id TEXT PRIMARY KEY REFERENCES knowledge_runs(id),unit_id TEXT NOT NULL REFERENCES review_units(id),
       request_key TEXT NOT NULL UNIQUE,signature TEXT NOT NULL,section TEXT NOT NULL,instruction TEXT NOT NULL,
       revision INTEGER NOT NULL,reply TEXT NOT NULL,payload TEXT NOT NULL,created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS review_unit_presentation_tasks (
+      run_id TEXT PRIMARY KEY REFERENCES knowledge_runs(id),unit_id TEXT NOT NULL REFERENCES review_units(id),
+      revision INTEGER NOT NULL,request_key TEXT NOT NULL UNIQUE
     );
     CREATE TABLE IF NOT EXISTS review_unit_requests (
       request_key TEXT PRIMARY KEY,unit_id TEXT NOT NULL REFERENCES review_units(id),signature TEXT NOT NULL

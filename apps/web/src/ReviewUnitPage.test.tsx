@@ -60,3 +60,29 @@ it('reads and edits knowledge connections inside unit composition rather than re
  const sent=JSON.parse(String(vi.mocked(api).mock.calls.find(([,i])=>i?.method==='PUT')![1]?.body))
  expect(sent.body.knowledge_connections[0].explanation).toBe('教师修改的知识连接理由')
 })
+
+it('queues the student expression agent without regenerating math research',async()=>{
+ let queued=false
+ setup((path,init)=>{
+  if(path==='/review-units/runs/u1/presentation'){queued=true;return {id:'presentation-job'}}
+  if(path==='/review-units/runs/u1')return {...unit,presentation_task:queued?{id:'presentation-job',status:'queued',revision:1,error:'',base_revision:1}:null}
+  return undefined
+ });await open();fireEvent.click(screen.getByRole('button',{name:'优化学生表达与版式'}))
+ await screen.findByRole('button',{name:'学生表达生成中…'})
+ expect(vi.mocked(api).mock.calls.some(([p])=>p==='/review-units/runs/u1/presentation')).toBe(true)
+ expect(vi.mocked(api).mock.calls.some(([p])=>p==='/corpus/studies')).toBe(false)
+ expect(screen.getByRole('button',{name:'编辑'}).hasAttribute('disabled')).toBe(true)
+})
+it('creates a separate draft before optimizing an existing immutable final',async()=>{
+ const final={...unit,read_only:true,versions:[{id:'old-final',revision:1,created_at:'2026-11-17'}]}
+ setup((path,init)=>{
+  if(path==='/review-units/runs/u1')return final
+  if(path==='/review-units/versions/old-final/revise')return {...unit,id:'new-draft',parent_version:'old-final'}
+  if(path==='/review-units/runs/new-draft/presentation')return {id:'presentation-job'}
+  if(path==='/review-units/runs/new-draft')return {...unit,id:'new-draft',parent_version:'old-final',presentation_task:{id:'presentation-job',status:'queued',revision:1,error:'',base_revision:1}}
+  return undefined
+ });await open();fireEvent.click(screen.getByRole('button',{name:'优化学生表达与版式（创建修改稿）'}))
+ await screen.findByRole('button',{name:'学生表达生成中…'})
+ const writes=vi.mocked(api).mock.calls.filter(([,i])=>i?.method==='POST').map(([p])=>p)
+ expect(writes).toEqual(['/review-units/versions/old-final/revise','/review-units/runs/new-draft/presentation'])
+})

@@ -23,6 +23,9 @@ def ev(s):return {'analysis_id':s['id'],'approach_id':s['analysis']['approaches'
 def model(config,system,payload,tokens):
     encoded=json.dumps(payload)
     assert 'UNREVIEWED-ANSWER-DO-NOT-SEND' not in encoded and 'data:image' not in encoded
+    if '学生阅读表达Agent' in system:
+        if 'knowledge' in payload:return json.dumps({'knowledge':[{'knowledge_ref':k['ref'],'plain_explanation':'先看两个方程说的是不是同一组未知数。','memory_hint':'先比较系数，再决定怎么消元。','self_check':'不看讲解，你能说说为什么要代回两个方程吗？'} for k in payload['knowledge']]}),None
+        return json.dumps({'introduction':'先别急着算。看看题目给了哪些相等关系，再试着把它们写下来。','goals':['你能说清为什么要同时满足两个方程吗？'],'cards':[{'card_index':c['card_index'],'student_lead':'看看这两道题，有没有同一个提示？'} for c in payload['cards']],'training':[{'training_index':t['training_index'],'student_lead':'先自己试一试，卡住了再看提示。'} for t in payload['training']],'review_notes':[]}),None
     if '逐一判断' in system:
         ref=payload['knowledge']['items'][5]['ref']
         return json.dumps({'mappings':[{'analysis_id':s['id'],'relevance':'core','reason':'加减消元用于求解','links':[ev(s)|{'knowledge_ref':ref,'role':'core','explanation':'两式相加消去y','conditions':'两个方程的y系数互为相反数'}],'gaps':['教师可判断是否补充实际应用。']} for s in payload['reviewed_studies']]}),None
@@ -46,9 +49,9 @@ def test_automatic_whole_bank_to_knowledge_maps_cards_training_and_one_teacher_f
     assert len(r['body']['mappings'])==2 and len(r['knowledge']['items'])==10
     assert len(r['body']['cards'])==1 and len(r['body']['training'])==3
     assert r['body']['cards'][0]['doubts'] and r['advice']
-    assert len(r['calls'])==4 and all(x['status']=='succeeded' for x in r['calls'])
+    assert len(r['calls'])==7 and all(x['status']=='succeeded' for x in r['calls'])
     preview=client.get('/api/review-units/runs/'+r['id']+'/preview');assert preview.status_code==200,preview.text
-    assert '未审定草案' in preview.text and '分层训练' in preview.text
+    assert '未审定草案' in preview.text and '动笔试试' in preview.text
     f=finish(client,r,note='教师认可现有提示；保留AI意见作为参考。');assert f.status_code==201,f.text
     fid=f.json()['id'];url='/api/review-units/versions/'+fid+'/download';original=client.get(url).content
     snapshot=client.get('/api/review-units/versions/'+fid+'/json').json()
@@ -197,7 +200,7 @@ def test_composition_generates_optional_knowledge_connections_in_same_call_and_t
         return json.dumps(value),usage
     monkeypatch.setattr(worker,'generate',connected);worker.run_one_knowledge();r=get(client,r)
     assert r['status']=='completed',r['error']
-    assert len(r['calls'])==4 and r['body']['knowledge_connections']
+    assert len(r['calls'])==7 and r['body']['knowledge_connections']
     b=json.loads(json.dumps(r['body']));b['knowledge_connections'][0]['target_ref']='foreign'
     assert save(client,r,b).status_code==422
     f=finish(client,r);assert f.status_code==201,f.text

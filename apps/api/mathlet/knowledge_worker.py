@@ -127,6 +127,10 @@ def run_one_knowledge():
             raise ValueError('模型服务配置与任务快照不同；恢复原配置后重试，或创建新候选批次')
         config=config.model_copy(update={k:frozen[k] for k in ['timeout','max_calls','output_token_budget']})
         snapshot=json.loads(run['input_json']);catalog=json.loads(run['catalog'])
+        if snapshot.get('presentation_task'):
+            from .student_presentation import run_presentation
+            run_presentation(run,config,snapshot)
+            return True
         if snapshot.get('review_unit_discussion'):
             from .review_unit_worker import run_discussion
             run_discussion(run,config,snapshot)

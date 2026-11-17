@@ -118,6 +118,7 @@ def init_db():
         init_corpus(c)
         from .review_unit_models import init_review_units
         init_review_units(c)
+        c.execute("INSERT OR IGNORE INTO schema_migrations VALUES(16,?)", (now(),))
         c.execute("INSERT OR IGNORE INTO schema_migrations VALUES(15,?)", (now(),))
         from .question_bank import init_bank
         init_bank(c)

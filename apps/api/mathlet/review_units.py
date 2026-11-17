@@ -88,10 +88,17 @@ def checked(c,meta,body):
     if selected and not phases.index('basic')<phases.index('thinking')<phases.index('solve'):raise ValueError('训练顺序须先基础唤起，再思路训练，最后独立解题')
     for t in value['training']:
         if not set(t['source_analysis_ids'])<=set(selected) or not set(t['knowledge_refs'])<=refs:raise ValueError('训练须引用本单元代表题与知识终稿')
+    from .student_presentation import current_presentation,validate
+    if current_presentation(value,know):validate(value['presentation'],value,know)
     return value
 
 def review_advice(body,checks,know):
     advice=list(checks)
+    from .student_presentation import current_presentation
+    presentation=current_presentation(body,know)
+    if body.get('presentation') and not presentation:advice.append({'section':'presentation','message':'正文已修改，先前学生表达对应旧修订；预览已回退到当前正文。','guidance':'可重新生成学生表达，或修改表达后保存以确认对应当前内容；不影响保留原文继续定稿。'})
+    if presentation:
+        advice.extend({'section':'presentation','message':note,'guidance':'核对学生讲解与原知识是否一致，可直接编辑后随单元整体审定。'} for note in presentation['review_notes'])
     if not body['selected_analysis_ids']:advice.append({'section':'training','message':'当前题库没有充分匹配的代表题，尚未形成思路与解题训练。','guidance':'本稿保留基础知识，不能声称已完成训练闭环。可补充相关研究终稿后重新编制，也可由教师决定本次仅作基础读物。'})
     used={l['knowledge_ref'] for m in body['mappings'] for l in m['links']}
     for k in know['items']:
@@ -110,9 +117,12 @@ def detail(c,r):
     versions=[dict(v) for v in c.execute('SELECT id,revision,created_at FROM review_unit_versions WHERE unit_id=? ORDER BY created_at DESC,rowid DESC',(r['id'],))]
     selected=body['selected_analysis_ids'] if body else []
     checks=json.loads(unit['checks'])
+    presentation_task=c.execute('SELECT k.id,k.status,k.revision,k.error,t.revision AS base_revision FROM review_unit_presentation_tasks t JOIN knowledge_runs k ON k.id=t.run_id WHERE t.unit_id=? ORDER BY k.created_at DESC,k.rowid DESC LIMIT 1',(r['id'],)).fetchone()
+    presentation_task=dict(presentation_task) if presentation_task else None
+    if presentation_task:presentation_task['calls']=[dict(x) for x in c.execute('SELECT step,status,error,reserved_tokens FROM knowledge_calls WHERE run_id=? ORDER BY rowid',(presentation_task['id'],))]
     current_final=next((v for v in versions if v['revision']==unit['revision']),None)
     teacher_review=json.loads(row(c,'review_unit_versions',current_final['id'])['snapshot']).get('teacher_review') if current_final else None
-    return {'id':r['id'],'status':r['status'],'stage':r['stage'],'run_revision':r['revision'],'revision':unit['revision'],'error':r['error'],'stale':not unit_current(c,meta),'title':json.loads(r['input_json'])['title'],'body':body,'checks':checks,'advice':review_advice(body,checks,know) if body else [],'knowledge':know,'studies':[study(c,key) for key in selected],'sources':meta['sources'],'representative_limit':meta['representative_limit'],'skipped_duplicates':meta.get('skipped_duplicates',0),'read_only':any(v['revision']==unit['revision'] for v in versions),'versions':versions,'parent_version':unit['parent_version'],'teacher_review':teacher_review,'calls':[dict(v) for v in c.execute('SELECT step,status,error,reserved_tokens FROM knowledge_calls WHERE run_id=? ORDER BY rowid',(r['id'],))]}
+    return {'id':r['id'],'status':r['status'],'stage':r['stage'],'run_revision':r['revision'],'revision':unit['revision'],'error':r['error'],'stale':not unit_current(c,meta),'title':json.loads(r['input_json'])['title'],'body':body,'checks':checks,'advice':review_advice(body,checks,know) if body else [],'knowledge':know,'studies':[study(c,key) for key in selected],'sources':meta['sources'],'representative_limit':meta['representative_limit'],'skipped_duplicates':meta.get('skipped_duplicates',0),'read_only':any(v['revision']==unit['revision'] for v in versions),'versions':versions,'presentation_task':presentation_task,'parent_version':unit['parent_version'],'teacher_review':teacher_review,'calls':[dict(v) for v in c.execute('SELECT step,status,error,reserved_tokens FROM knowledge_calls WHERE run_id=? ORDER BY rowid',(r['id'],))]}
 
 @router.get('/catalog')
 def catalog():
@@ -148,7 +158,9 @@ def start(body:Start):
         try:groups=batches([compact(study(c,s['id'])) for s in sources])
         except ValueError as exc:raise HTTPException(422,str(exc)) from None
         # Reserve the full automatic pipeline explicitly, including two attempts per step.
-        calls=len(groups)+3;budget=len(groups)*7000+18000
+        from .student_presentation import plan as presentation_plan
+        reading_plan=presentation_plan(know)
+        calls=len(groups)+3+len(reading_plan);budget=len(groups)*7000+18000+sum(tokens for _,tokens in reading_plan)
         config=config.model_copy(update={'max_calls':max(config.max_calls,calls*2),'output_token_budget':max(config.output_token_budget,budget*2)})
         key=uid();unit=uid();snapshot={'title':know['title']+' · 复习单元','chapters':[],'review_unit_task':meta}
         from .model_provider import public_provider
@@ -171,7 +183,12 @@ def save(key:str,body:Save):
     with connect() as c:
         c.execute('BEGIN IMMEDIATE');r=row(c,'knowledge_runs',key);d=detail(c,r);revision(r,body.run_revision);revision(d,body.revision)
         if d['stale'] or d['read_only'] or r['status']!='completed':raise HTTPException(409,'依据已变化、任务未完成或为只读终稿，请先继续修订')
-        try:value=checked(c,json.loads(r['input_json'])['review_unit_task'],body.body.model_dump())
+        candidate=body.body.model_dump()
+        if candidate.get('presentation') and candidate['presentation']!=(d['body'] or {}).get('presentation'):
+            from .student_presentation import source_hash
+            candidate['presentation']['source_hash']=source_hash(candidate,d['knowledge'])
+            candidate['presentation']['agent']=((d['body'] or {}).get('presentation') or {}).get('agent')
+        try:value=checked(c,json.loads(r['input_json'])['review_unit_task'],candidate)
         except ValueError as exc:raise HTTPException(422,str(exc)) from None
         c.execute('INSERT INTO review_unit_history VALUES(?,?,?,?,?)',(uid(),key,d['revision'],packed(d['body']),now()))
         c.execute('UPDATE review_units SET payload=?,revision=revision+1 WHERE id=?',(packed(value),key))
@@ -199,7 +216,8 @@ def retry(key:str,body:Rev):
         c.execute('BEGIN IMMEDIATE');r=row(c,'knowledge_runs',key);d=detail(c,r);revision(r,body.run_revision);revision(d,body.revision)
         if d['stale'] or r['status'] not in {'failed','interrupted'}:raise HTTPException(409,'只能重试依据有效的失败或中断任务')
         if d['body']:raise HTTPException(409,'已有教师草稿，不自动覆盖')
-        c.execute("UPDATE knowledge_runs SET status='queued',error='',revision=revision+1,updated_at=? WHERE id=?",(now(),key))
+        config=retry_budget(c,r,d['knowledge'],json.loads(r['input_json'])['review_unit_task'])
+        c.execute("UPDATE knowledge_runs SET model_json=?,status='queued',error='',revision=revision+1,updated_at=? WHERE id=?",(packed(config),now(),key))
         return detail(c,row(c,'knowledge_runs',key))
 @router.post('/versions/{key}/revise',status_code=201)
 def revise(key:str):
@@ -254,7 +272,7 @@ def discuss(key:str,body:Discuss):
     with connect() as c:
         c.execute('BEGIN IMMEDIATE');r=row(c,'knowledge_runs',key);d=detail(c,r);revision(r,body.run_revision);revision(d,body.revision)
         if d['stale'] or r['status']!='completed' or not d['body']:raise HTTPException(409,'请等待草案完成并使用有效来源讨论')
-        if body.section not in {'introduction','goals','basics','mappings','cards','training','solutions','summary','knowledge_connections'}:raise HTTPException(422,'未知栏目')
+        if body.section not in {'introduction','goals','basics','mappings','cards','training','solutions','summary','knowledge_connections','presentation'}:raise HTTPException(422,'未知栏目')
         # Discussion may contain unsaved work, but can never mutate the saved manuscript.
         from .review_unit_worker import compact
         payload={'knowledge':d['knowledge'],'reviewed_studies':[compact(s) for s in d['studies']],'section':body.section,'current_section':body.body.model_dump().get(body.section),'instruction':body.instruction,'based_revision':body.revision,'uses_unsaved_body':body.body.model_dump()!=d['body']}
@@ -270,3 +288,48 @@ def discuss(key:str,body:Discuss):
         child=queue(c,'复习单元AI讨论',task,config,2500)
         c.execute('INSERT INTO review_unit_discussions VALUES(?,?,?,?,?,?,?,?,?,?)',(child['id'],key,body.request_key,signature,body.section,body.instruction,body.revision,'',packed(payload),now()))
         return {'id':child['id']}
+
+
+def retry_budget(c,run,know,meta=None):
+    from .student_presentation import plan
+    steps=plan(know)
+    if meta is not None:
+        from .review_unit_worker import batches,compact
+        groups=batches([compact(study(c,s['id'])) for s in meta['sources']])
+        steps=[(f'unit:mapping:{i+1}',7000) for i in range(len(groups))]+[('unit:cards',6500),('unit:training',8500),('unit:review',3000)]+steps
+    successful={x['step'] for x in c.execute("SELECT step FROM knowledge_calls WHERE run_id=? AND status IN ('succeeded','revalidated')",(run['id'],))}
+    count,reserved=c.execute('SELECT count(*),coalesce(sum(reserved_tokens),0) FROM knowledge_calls WHERE run_id=?',(run['id'],)).fetchone()
+    remaining=[tokens for step,tokens in steps if step not in successful];config=json.loads(run['model_json'])
+    config.update(max_calls=max(config['max_calls'],count+len(remaining)),output_token_budget=max(config['output_token_budget'],reserved+sum(remaining)))
+    return config
+
+class Present(Rev):request_key:str=Field(min_length=8,max_length=100)
+@router.post('/runs/{key}/presentation',status_code=201)
+def start_presentation(key:str,body:Present):
+    from .student_presentation import plan
+    config=provider()
+    with connect() as c:
+        c.execute('BEGIN IMMEDIATE');r=row(c,'knowledge_runs',key);d=detail(c,r)
+        old=c.execute('SELECT * FROM review_unit_presentation_tasks WHERE request_key=?',(body.request_key,)).fetchone()
+        if old:
+            if old['unit_id']!=key or old['revision']!=body.revision:raise HTTPException(409,'此请求编号对应另一个稿件修订')
+            return {'id':old['run_id']}
+        revision(r,body.run_revision);revision(d,body.revision)
+        if d['stale'] or d['read_only'] or r['status']!='completed' or not d['body']:raise HTTPException(409,'请基于有效的可编辑工作稿生成；已定稿时先继续修订')
+        if d['presentation_task'] and d['presentation_task']['status'] in {'queued','running'}:raise HTTPException(409,'学生表达正在生成，请稍候')
+        steps=plan(d['knowledge']);config=config.model_copy(update={'max_calls':max(config.max_calls,len(steps)*2),'output_token_budget':max(config.output_token_budget,sum(t for _,t in steps)*2)})
+        from .corpus import queue
+        meta={'parent_id':key,'parent_revision':body.revision,'sources':json.loads(r['input_json'])['review_unit_task'],'body':d['body'],'knowledge':d['knowledge']}
+        child=queue(c,'学生阅读表达Agent',{'title':'学生阅读表达Agent','chapters':[],'presentation_task':meta},config,sum(t for _,t in steps)*2)
+        c.execute('INSERT INTO review_unit_presentation_tasks VALUES(?,?,?,?)',(child['id'],key,body.revision,body.request_key))
+        return {'id':child['id']}
+class PresentationRetry(Strict):revision:int
+@router.post('/presentation-tasks/{key}/retry')
+def retry_presentation(key:str,body:PresentationRetry):
+    from .student_presentation import task_current
+    with connect() as c:
+        c.execute('BEGIN IMMEDIATE');r=row(c,'knowledge_runs',key);revision(r,body.revision);meta=json.loads(r['input_json']).get('presentation_task')
+        if not meta or r['status'] not in {'failed','interrupted'} or not task_current(c,meta):raise HTTPException(409,'正文或依据已变化，或任务不可重试；请基于当前工作稿重新生成学生表达')
+        config=retry_budget(c,r,meta['knowledge'])
+        c.execute("UPDATE knowledge_runs SET model_json=?,status='queued',error='',revision=revision+1,updated_at=? WHERE id=?",(packed(config),now(),key))
+        return {'id':key}

@@ -32,6 +32,9 @@ def current(c, run):
     unit=row(c,'knowledge_units',run['unit_id'])
     if unit['revision']!=run['input_revision'] or origin_stale(c,unit): return False
     snapshot=json.loads(run['input_json'])
+    if snapshot.get('presentation_task'):
+        from .student_presentation import task_current
+        return task_current(c,snapshot['presentation_task'])
     if snapshot.get('review_unit_discussion'):
         from .review_units import unit_current
         return unit_current(c,snapshot['review_unit_discussion']['sources'])
