@@ -32,7 +32,7 @@ it('AI opinions do not veto teacher confirmation and optional notes submit with 
 })
 it('inline editing protects unsaved work and save does not finalize or erase a teacher note',async()=>{
  const dirty=setup((path,init)=>path==='/review-units/runs/u1'&&init?.method==='PUT'?{...unit,revision:2,body:JSON.parse(String(init.body)).body}:undefined);await open()
- fireEvent.click(screen.getByRole('button',{name:'编辑'}));fireEvent.change(screen.getByLabelText('导读'),{target:{value:'教师修改的导读'}})
+ fireEvent.click(screen.getByRole('button',{name:'编辑'}));fireEvent.change(screen.getByLabelText('教师参考：导读'),{target:{value:'教师修改的导读'}})
  await waitFor(()=>expect(dirty).toHaveBeenLastCalledWith(true));expect(screen.getByLabelText('整体确认复习单元').hasAttribute('disabled')).toBe(true)
  fireEvent.change(screen.getByLabelText('单元审核说明'),{target:{value:'保留审核说明'}});fireEvent.click(screen.getByRole('button',{name:'保存单元修改'}));await screen.findByText('单元修改已保存，尚未定稿。')
  expect((screen.getByLabelText('单元审核说明') as HTMLTextAreaElement).value).toBe('保留审核说明');expect(screen.getByText('教师修改的导读')).toBeTruthy();expect(vi.mocked(api).mock.calls.some(([p])=>p.endsWith('/finalize'))).toBe(false)
@@ -43,7 +43,7 @@ it('stale sources keep historical reader links but disable saving and finalizati
  expect(screen.getByRole('button',{name:'基于此终稿继续修订'}).hasAttribute('disabled')).toBe(true)
 })
 it('AI discussion sends the current unsaved section but never applies its reply automatically',async()=>{
- setup();await open();fireEvent.click(screen.getByRole('button',{name:'编辑'}));fireEvent.change(screen.getByLabelText('导读'),{target:{value:'尚未保存的导读'}})
+ setup();await open();fireEvent.click(screen.getByRole('button',{name:'编辑'}));fireEvent.change(screen.getByLabelText('教师参考：导读'),{target:{value:'尚未保存的导读'}})
  fireEvent.change(screen.getByLabelText('复习单元AI讨论'),{target:{value:'请检查这个导读'}});fireEvent.click(screen.getByRole('button',{name:'发送讨论'}))
  await waitFor(()=>expect(vi.mocked(api).mock.calls.some(([p,i])=>p.endsWith('/discussions')&&i?.method==='POST')).toBe(true))
  const c=vi.mocked(api).mock.calls.find(([p,i])=>p.endsWith('/discussions')&&i?.method==='POST')!;expect(JSON.parse(String(c[1]?.body)).body.introduction).toBe('尚未保存的导读')
@@ -85,4 +85,19 @@ it('creates a separate draft before optimizing an existing immutable final',asyn
  await screen.findByRole('button',{name:'学生表达生成中…'})
  const writes=vi.mocked(api).mock.calls.filter(([,i])=>i?.method==='POST').map(([p])=>p)
  expect(writes).toEqual(['/review-units/versions/old-final/revise','/review-units/runs/new-draft/presentation'])
+})
+
+it('uses student introduction and summary while retaining editorial reports in a separate collapsed reference',async()=>{
+ const editorial='b202 知识映射 core，需教师核对，未单独成卡。'
+ const p={source_hash:'h',introduction:'先看看题目给了你什么条件。',goals:['你能说清每一步的理由吗？'],summary:'先观察条件，再选择方法，最后检查结果。',knowledge:[],cards:[],training:[],review_notes:[]}
+ setup(path=>path==='/review-units/runs/u1'?{...unit,body:{...body,introduction:editorial,summary:editorial,presentation:p}}:undefined);await open()
+ expect(screen.getByText(p.introduction)).toBeTruthy()
+ const source=screen.getByText(editorial).closest('details') as HTMLDetailsElement
+ expect(source.open).toBe(false)
+ fireEvent.click(screen.getByRole('button',{name:'回顾与边界'}));expect(screen.getByText(p.summary)).toBeTruthy()
+ fireEvent.click(screen.getByRole('button',{name:'编辑'}));fireEvent.change(screen.getByLabelText('学生思路导读'),{target:{value:'学生可以直接使用的思考提示'}})
+ fireEvent.click(screen.getByRole('button',{name:'保存单元修改'}))
+ await waitFor(()=>expect(vi.mocked(api).mock.calls.some(([,i])=>i?.method==='PUT')).toBe(true))
+ const sent=JSON.parse(String(vi.mocked(api).mock.calls.find(([,i])=>i?.method==='PUT')![1]?.body))
+ expect(sent.body.presentation.summary).toBe('学生可以直接使用的思考提示');expect(sent.body.summary).toBe(editorial)
 })

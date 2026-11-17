@@ -96,7 +96,8 @@ def review_advice(body,checks,know):
     advice=list(checks)
     from .student_presentation import current_presentation
     presentation=current_presentation(body,know)
-    if body.get('presentation') and not presentation:advice.append({'section':'presentation','message':'正文已修改，先前学生表达对应旧修订；预览已回退到当前正文。','guidance':'可重新生成学生表达，或修改表达后保存以确认对应当前内容；不影响保留原文继续定稿。'})
+    if body.get('presentation') and not presentation:advice.append({'section':'presentation','message':'学生表达与当前正文不一致，或仍含内部标记／教研说明；预览已回退到当前正文及通用学习提示。','guidance':'点击优化学生表达与版式，或编辑学生表达后保存。教师参考中的编排说明不会进入学生导读；旧终稿保持不变。'})
+    if not presentation or not presentation.get('summary'):advice.append({'section':'summary','message':'尚无本单元的学生思路导读。教研归纳只保留给教师，学生版使用通用思考提示。','guidance':'可点击优化学生表达与版式生成，或在学生表达中补写summary。不要把研究编号、分类标签或审核待办写进学生讲解。'})
     if presentation:
         advice.extend({'section':'presentation','message':note,'guidance':'核对学生讲解与原知识是否一致，可直接编辑后随单元整体审定。'} for note in presentation['review_notes'])
     if not body['selected_analysis_ids']:advice.append({'section':'training','message':'当前题库没有充分匹配的代表题，尚未形成思路与解题训练。','guidance':'本稿保留基础知识，不能声称已完成训练闭环。可补充相关研究终稿后重新编制，也可由教师决定本次仅作基础读物。'})
@@ -275,7 +276,7 @@ def discuss(key:str,body:Discuss):
         if body.section not in {'introduction','goals','basics','mappings','cards','training','solutions','summary','knowledge_connections','presentation'}:raise HTTPException(422,'未知栏目')
         # Discussion may contain unsaved work, but can never mutate the saved manuscript.
         from .review_unit_worker import compact
-        payload={'knowledge':d['knowledge'],'reviewed_studies':[compact(s) for s in d['studies']],'section':body.section,'current_section':body.body.model_dump().get(body.section),'instruction':body.instruction,'based_revision':body.revision,'uses_unsaved_body':body.body.model_dump()!=d['body']}
+        payload={'knowledge':d['knowledge'],'reviewed_studies':[compact(s) for s in d['studies']],'section':body.section,'current_section':(body.body.presentation.model_dump().get(body.section) if body.body.presentation and body.section in {'introduction','goals','summary'} else body.body.model_dump().get(body.section)),'instruction':body.instruction,'based_revision':body.revision,'uses_unsaved_body':body.body.model_dump()!=d['body']}
         if len(packed(payload))>220000:raise HTTPException(422,'当前栏目与依据过长，请缩小单元的代表题范围后讨论；未发送模型')
         signature=digest({'unit':key,'payload':payload})
         old=c.execute('SELECT * FROM review_unit_discussions WHERE request_key=?',(body.request_key,)).fetchone()

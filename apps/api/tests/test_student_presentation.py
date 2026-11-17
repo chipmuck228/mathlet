@@ -98,3 +98,64 @@ def test_teacher_edit_during_an_actual_presentation_call_wins_over_agent_respons
     assert changed and latest['presentation_task']['status']=='failed'
     assert latest['body']['introduction']=='教师在模型回复期间保存的导读'
     assert latest['presentation_task']['calls'][0]['status']=='succeeded'
+
+
+def test_editorial_summary_never_becomes_student_intro_and_internal_ids_get_readable_names(client,monkeypatch):
+    r,_,_,_=complete(client,monkeypatch)
+    ids=r['body']['selected_analysis_ids'];report=f'从三道代表题归纳出共用线索，{ids[0][:4]} 与 {ids[1][:5]} 的知识映射均为 core，另一题为 optional 背景联系，未单独成卡。完整推理需教师核对解答。'
+    b=json.loads(json.dumps(r['body']));b['introduction']=report;b['summary']=report;b['presentation']=None
+    response=save(client,r,b);assert response.status_code==200,response.text;r=response.json()
+    html=client.get('/api/review-units/runs/'+r['id']+'/preview').text
+    assert '知识映射均为' not in html and '未单独成卡' not in html and '需教师核对' not in html
+    from lxml.html import fromstring
+    page=fromstring(html)
+    for node in page.xpath('//style'):node.drop_tree()
+    visible=page.text_content()
+    assert 'core' not in visible and 'optional' not in visible and ids[0][:4] not in visible and ids[1][:5] not in visible
+    assert '例题 1' in html and '例题 2' in html and '把下面的知识和例题' in html
+    assert r['body']['summary']==report  # Teacher report remains intact for audit and editing.
+    old=finish(client,r);assert old.status_code==201,old.text
+    url='/api/review-units/versions/'+old.json()['id']+'/download';original=client.get(url).content
+    fork=client.post('/api/review-units/versions/'+old.json()['id']+'/revise').json()
+    task=client.post('/api/review-units/runs/'+fork['id']+'/presentation',json={'revision':fork['revision'],'run_revision':fork['run_revision'],'request_key':'clean-editorial-student-copy'});assert task.status_code==201,task.text
+    sent=[]
+    def capture(config,system,payload,tokens):
+        sent.append(payload);encoded=json.dumps(payload)
+        assert all(key not in encoded for key in ids)
+        assert 'optional' not in encoded and '"scope"' not in encoded and '知识映射均为' not in encoded
+        return model(config,system,payload,tokens)
+    monkeypatch.setattr(worker,'generate',capture);worker.run_one_knowledge();next_draft=get(client,fork)
+    assert next_draft['presentation_task']['status']=='completed',next_draft['presentation_task']['error']
+    assert next_draft['body']['presentation']['summary'] and next_draft['body']['summary']==report
+    final=finish(client,next_draft);assert final.status_code==201,final.text
+    html=client.get('/api/review-units/versions/'+final.json()['id']+'/download').text
+    assert '先看题目给了什么相等关系' in html and report not in html and 'optional' not in html and 'core' not in html
+    assert client.get(url).content==original
+
+
+def test_agent_rewrites_a_contaminated_opening_once_and_keeps_teacher_notes_separate(client,monkeypatch):
+    v,_,_=prepare(client,monkeypatch);r=start(client,v);attempts=0
+    def contaminated(config,system,payload,tokens):
+        nonlocal attempts
+        raw,usage=model(config,system,payload,tokens)
+        if '学生阅读表达Agent' in system and 'cards' in payload:
+            attempts+=1;value=json.loads(raw)
+            if attempts==1:value['summary']='b202 的知识映射为 core，需教师核对。'
+            else:value['review_notes']=['教师可以核对本段是否足够清楚。']
+            return json.dumps(value),usage
+        return raw,usage
+    monkeypatch.setattr(worker,'generate',contaminated);worker.run_one_knowledge();r=get(client,r)
+    assert r['status']=='completed' and r['body']['presentation'] and attempts==2
+    assert any(x['step'].endswith(':clean') and x['status']=='succeeded' for x in r['calls'])
+    assert any('教师可以核对' in a['message'] for a in r['advice'])
+    html=client.get('/api/review-units/runs/'+r['id']+'/preview').text
+    assert '教师可以核对' not in html and 'b202' not in html and 'core' not in html
+
+
+def test_public_example_aliases_preserve_formula_symbols_and_avoid_ambiguous_prefixes():
+    from mathlet.student_language import aliases,public_text
+    body={'selected_analysis_ids':['b2020000','b2021111','a7a66000']}
+    names=aliases(body,{'items':[]})
+    assert 'b202' not in names and names['a7a66']=='例题 3'
+    assert public_text('`a7a66`',names)=='例题 3'
+    assert public_text(r'a7a66 与 b2020000；数学符号\(b2020000+1\)',names)==r'例题 3 与 例题 1；数学符号\(b2020000+1\)'

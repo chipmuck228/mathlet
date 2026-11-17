@@ -25,7 +25,7 @@ def model(config,system,payload,tokens):
     assert 'UNREVIEWED-ANSWER-DO-NOT-SEND' not in encoded and 'data:image' not in encoded
     if '学生阅读表达Agent' in system:
         if 'knowledge' in payload:return json.dumps({'knowledge':[{'knowledge_ref':k['ref'],'plain_explanation':'先看两个方程说的是不是同一组未知数。','memory_hint':'先比较系数，再决定怎么消元。','self_check':'不看讲解，你能说说为什么要代回两个方程吗？'} for k in payload['knowledge']]}),None
-        return json.dumps({'introduction':'先别急着算。看看题目给了哪些相等关系，再试着把它们写下来。','goals':['你能说清为什么要同时满足两个方程吗？'],'cards':[{'card_index':c['card_index'],'student_lead':'看看这两道题，有没有同一个提示？'} for c in payload['cards']],'training':[{'training_index':t['training_index'],'student_lead':'先自己试一试，卡住了再看提示。'} for t in payload['training']],'review_notes':[]}),None
+        return json.dumps({'summary':'先看题目给了什么相等关系，再想怎样消去一个未知数。做完以后，把结果代回两个方程检查。','introduction':'先别急着算。看看题目给了哪些相等关系，再试着把它们写下来。','goals':['你能说清为什么要同时满足两个方程吗？'],'cards':[{'card_index':c['card_index'],'student_lead':'看看这两道题，有没有同一个提示？'} for c in payload['cards']],'training':[{'training_index':t['training_index'],'student_lead':'先自己试一试，卡住了再看提示。'} for t in payload['training']],'review_notes':[]}),None
     if '逐一判断' in system:
         ref=payload['knowledge']['items'][5]['ref']
         return json.dumps({'mappings':[{'analysis_id':s['id'],'relevance':'core','reason':'加减消元用于求解','links':[ev(s)|{'knowledge_ref':ref,'role':'core','explanation':'两式相加消去y','conditions':'两个方程的y系数互为相反数'}],'gaps':['教师可判断是否补充实际应用。']} for s in payload['reviewed_studies']]}),None
@@ -94,7 +94,7 @@ def test_idempotent_generation_checkpoint_retry_and_no_overwrite_from_discussion
     retry=client.post('/api/review-units/runs/'+r['id']+'/retry',json={'revision':r['revision'],'run_revision':r['run_revision']});assert retry.status_code==200,retry.text
     worker.run_one_knowledge();r=get(client,r);assert r['status']=='completed',r['error']
     assert sum('逐一判断' in s for s in calls)==1 and sum('比较不同代表题' in s for s in calls)==1
-    chat_body=json.loads(json.dumps(r['body']));chat_body['introduction']='未保存的教师修改'
+    chat_body=json.loads(json.dumps(r['body']));chat_body['presentation']['introduction']='未保存的教师修改'
     data={'revision':r['revision'],'run_revision':r['run_revision'],'body':chat_body,'section':'introduction','instruction':'怎样改善导读？','request_key':'unit-discussion-idempotent'}
     d=client.post('/api/review-units/runs/'+r['id']+'/discussions',json=data);assert d.status_code==201,d.text
     assert client.post('/api/review-units/runs/'+r['id']+'/discussions',json=data).json()['id']==d.json()['id']
