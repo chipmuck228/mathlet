@@ -83,3 +83,11 @@ body{--keyboard-zindex:2100}
 .research-review-advice details{margin:10px 0;padding:8px 0;border-top:1px solid #e7d8b8}
 .research-review-advice summary{font-weight:600;cursor:pointer}
 .research-review-advice textarea{min-height:85px}
+
+/* One reading/editing surface for the complete review unit. */
+.review-unit-grid{display:grid;grid-template-columns:210px minmax(0,1fr) 300px;gap:22px;align-items:start;margin-top:24px}
+.unit-outline,.unit-review{position:sticky;top:20px;max-height:calc(100vh - 45px);overflow:auto;padding:16px;background:#f4f5ef;border:1px solid #dde2d6;border-radius:8px;min-width:0}
+.unit-outline>button{display:block;text-align:left;width:100%;padding:10px 8px;border-radius:5px;color:#435341}.unit-outline>button.active{background:#dfe8d8;font-weight:600}
+.unit-manuscript{min-width:0;padding:24px;background:#fffef9;border:1px solid #e1e5da;border-radius:8px}.unit-manuscript article{margin:28px 0;padding-bottom:22px;border-bottom:1px solid #e1e5da}.unit-manuscript iframe{width:100%;height:78vh;border:1px solid #ddd;background:white}
+.unit-edit-item{padding:12px 0;border-bottom:1px solid #e2e5dc}.unit-inline{margin:8px 0 18px}.unit-inline textarea{width:100%}.unit-mapping{padding:13px;border-left:3px solid #9cae94;margin:12px 0;background:#f8faf5}.unit-role-uncertain{border-color:#bd8b37;background:#fff8e9}.unit-role-none{border-color:#aaa;background:#f4f4f1}.unit-role-optional{border-color:#7390ac}.unit-advice-dot{color:#a57123}.unit-review details{border-bottom:1px solid #d8ddcf;padding:12px 0}.unit-review textarea{min-height:100px}.unit-review p{overflow-wrap:anywhere}.unit-source-picker{max-height:240px;overflow:auto}.unit-savebar{position:sticky;bottom:12px;background:#f1f4e9;border:1px solid #ccd6c1;padding:12px;display:flex;gap:12px;margin-top:20px}.unit-chat{border-top:1px solid #cfd7c8;margin-top:18px;padding-top:14px}
+@media(max-width:1250px){.review-unit-grid{grid-template-columns:170px minmax(0,1fr)}.unit-review{position:static;grid-column:1/-1;max-height:none}}@media(max-width:760px){.review-unit-grid{display:block}.unit-outline,.unit-review{position:static;max-height:none;margin-bottom:16px}.unit-manuscript{padding:16px}}

@@ -32,6 +32,12 @@ def current(c, run):
     unit=row(c,'knowledge_units',run['unit_id'])
     if unit['revision']!=run['input_revision'] or origin_stale(c,unit): return False
     snapshot=json.loads(run['input_json'])
+    if snapshot.get('review_unit_discussion'):
+        from .review_units import unit_current
+        return unit_current(c,snapshot['review_unit_discussion']['sources'])
+    if snapshot.get('review_unit_task'):
+        from .review_units import unit_current
+        return unit_current(c,snapshot['review_unit_task'])
     if snapshot.get('corpus_task'):
         from .corpus import corpus_current
         return corpus_current(c,snapshot['corpus_task'])
@@ -135,7 +141,7 @@ def configure_provider(body: Provider): return save_provider(body)
 
 @router.get('/units')
 def units():
-    with connect() as c: return [unit_json(c,r) for r in c.execute('SELECT * FROM knowledge_units ORDER BY created_at DESC') if not any(json.loads(r['origin']).get(k) for k in ['internal_planning','internal_research','internal_paper','internal_teaching','internal_exam'])]
+    with connect() as c: return [unit_json(c,r) for r in c.execute('SELECT * FROM knowledge_units ORDER BY created_at DESC') if not any(json.loads(r['origin']).get(k) for k in ['internal_planning','internal_research','internal_paper','internal_teaching','internal_exam','internal_review_unit'])]
 
 @router.post('/units',status_code=201)
 def create_unit(body: UnitInput):

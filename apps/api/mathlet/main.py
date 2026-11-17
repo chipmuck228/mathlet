@@ -433,6 +433,9 @@ app.include_router(corpus_router)
 from .question_bank import router as question_bank_router
 app.include_router(question_bank_router)
 
+from .review_units import router as review_unit_router
+app.include_router(review_unit_router)
+
 web = ROOT / "apps" / "web" / "dist"
 if web.is_dir():
     app.mount("/", StaticFiles(directory=web, html=True), name="web")

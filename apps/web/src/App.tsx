@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react"
 import { BookOpen, Check, FileCheck2, Files, GitBranch, ListTree, Loader2, MessageSquare, Package, Plus, RefreshCw, Upload } from "lucide-react"
 import PlanningPage from "./PlanningPage"
 import TeachingPage from "./TeachingPage"
+import ReviewUnitPage from "./ReviewUnitPage"
 import ResearchPage from "./ResearchManuscriptPage"
 import PaperResearchPage from "./PaperResearchPage"
 import CorpusResearchPage from "./CorpusResearchPage"
@@ -20,6 +21,7 @@ const stages = [
   { id: "research", label: "题目与研究", icon: BookOpen },
   { id: "paper", label: "整卷研究", icon: BookOpen },
   { id: "corpus", label: "题库研究", icon: BookOpen },
+  { id: "unit", label: "复习单元编制", icon: BookOpen },
   { id: "tasks", label: "任务与生成", icon: GitBranch },
   { id: "editor", label: "编辑与评审", icon: MessageSquare },
   { id: "preview", label: "小册子预览", icon: BookOpen },
@@ -97,6 +99,7 @@ export default function App() {
   const [researchDirty,setResearchDirty]=useState(false)
   const [corpusDirty,setCorpusDirty]=useState(false),[corpusBusy,setCorpusBusy]=useState(false)
   const [teachingDirty,setTeachingDirty]=useState(false)
+  const [unitDirty,setUnitDirty]=useState(false)
   const [paperDirty,setPaperDirty]=useState(false),[requestedResearchRun,setRequestedResearchRun]=useState("")
   const [knowledgeDirty, setKnowledgeDirty] = useState(false)
   const [requestedBlockId, setRequestedBlockId] = useState("")
@@ -155,6 +158,7 @@ export default function App() {
     } catch (e) { setMessage(String(e)) } finally { setBusy(false) }
   }
   function navigate(next: string) {
+    if (stage === "unit" && unitDirty && next !== stage && !window.confirm("有未保存的复习单元或审核说明，离开会丢弃。继续？")) return
     if (stage === "corpus" && corpusBusy && next !== stage) return
     if (stage === "corpus" && corpusDirty && next !== stage && !window.confirm("有未保存的知识关联或思路卡修改，离开将丢弃。继续？")) return
     if (stage === "tasks" && teachingDirty && next !== stage && !window.confirm("有未保存的应用映射或训练修改，离开会丢弃。继续？")) return
@@ -172,9 +176,10 @@ export default function App() {
       <div className="sidebar-caption">内容生产</div><nav aria-label="工作区">{stages.map(({ id, label, icon: Icon }, i) => <button key={id} disabled={stage==="corpus"&&corpusBusy} title={stage==="corpus"&&corpusBusy?"正在保存或载入，请稍候":undefined} className={stage === id ? "active" : ""} onClick={() => navigate(id)} aria-current={stage === id ? "page" : undefined}><Icon size={17} /><span>{label}</span><small>0{i + 1}</small></button>)}</nav>
       <div className="sidebar-footer"><span className={online ? "dot online" : "dot"} />{online ? "本地服务已连接" : "等待本地 API"}<p>资料留存在本机<br />代码通过 GitHub 管理</p></div></aside>
     <div className="workspace"><header className="workspace-header"><span>Mathlet / {stages.find(s => s.id === stage)?.label}</span><span className="label">本地版 · 0.3</span></header>
-      <main><div className="intro"><div><p className="eyebrow">理解知识 · 发现连接 · 建立思路</p><h1>{({ materials: "从可信资料开始。", sources: "让每个条件都准确。", planning: "把知识组织成复习路径。", knowledge: "从知识草案到教师确认。", research:"从完整题目建立解题思路。", tasks: "把生成过程留在记录里。", editor: "让思路经得起检查。", preview: "回到学生的阅读视角。", releases: "交付一个确定的版本。" } as Record<string, string>)[stage]}</h1></div><Button variant="outline" size="sm" onClick={() => void refresh()}><RefreshCw />刷新列表</Button></div>
+      <main><div className="intro"><div><p className="eyebrow">理解知识 · 发现连接 · 建立思路</p><h1>{({ materials: "从可信资料开始。", sources: "让每个条件都准确。", planning: "把知识组织成复习路径。", knowledge: "从知识草案到教师确认。", research:"从完整题目建立解题思路。", unit: "把知识与真题编成学习过程。", tasks: "把生成过程留在记录里。", editor: "让思路经得起检查。", preview: "回到学生的阅读视角。", releases: "交付一个确定的版本。" } as Record<string, string>)[stage]}</h1></div><Button variant="outline" size="sm" onClick={() => void refresh()}><RefreshCw />刷新列表</Button></div>
       {!online && <div className="notice" role="alert">尚未连接 API。请按 README 启动 FastAPI（8000）和 Worker；前端通过 Vite 代理访问。</div>}
       <Message value={message} />
+      {stage === "unit" && <ReviewUnitPage onDirtyChange={setUnitDirty} onOpenKnowledge={()=>navigate("knowledge")} />}
       {stage === "corpus" && <CorpusResearchPage onDirtyChange={setCorpusDirty} onBusyChange={setCorpusBusy} />}
       {stage === "paper" && <PaperResearchPage onDirtyChange={setPaperDirty} onOpenRun={id=>{setRequestedResearchRun(id);setStage("research")}} />}
       {stage === "research" && <ResearchPage initialRunId={requestedResearchRun} documents={documents} onDirtyChange={setResearchDirty} openKnowledge={()=>setStage("knowledge")} />}
