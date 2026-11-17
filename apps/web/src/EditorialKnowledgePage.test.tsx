@@ -38,7 +38,8 @@ it('edits inline, sends unsaved context to AI, and saves without finalizing',asy
  })
  await open();fireEvent.click(screen.getByRole('button',{name:'编辑'}))
  fireEvent.change(screen.getByLabelText('准确表述'),{target:{value:'教师新表述'}})
- expect((screen.getByRole('tab',{name:'知识关系'}) as HTMLButtonElement).disabled).toBe(true)
+ expect(screen.queryByRole('tab',{name:'知识关系'})).toBeNull()
+ expect(screen.queryByLabelText('适用范围')).toBeNull()
  fireEvent.change(screen.getByLabelText('给 AI 的问题或要求'),{target:{value:'请核查'}})
  fireEvent.click(screen.getByRole('button',{name:'发送'}))
  await screen.findAllByText('建议补充定义域')
@@ -60,7 +61,7 @@ it('forms a whole-manuscript final even with AI questions and opens a separate r
  })
  await open();const button=screen.getByRole('button',{name:'形成终稿'}) as HTMLButtonElement
  expect(button.disabled).toBe(true)
- fireEvent.click(screen.getByLabelText(/我已检查整份清单/));expect(button.disabled).toBe(false);fireEvent.click(button)
+ fireEvent.click(screen.getByLabelText(/我已检查纳入条目/));expect(button.disabled).toBe(false);fireEvent.click(button)
  await screen.findByRole('button',{name:'基于终稿继续修订'})
  expect((screen.getByRole('button',{name:'编辑'}) as HTMLButtonElement).disabled).toBe(true)
  fireEvent.click(screen.getByRole('button',{name:'基于终稿继续修订'}))
@@ -68,48 +69,33 @@ it('forms a whole-manuscript final even with AI questions and opens a separate r
  expect(vi.mocked(api).mock.calls.some(([p])=>p.endsWith('/runs') )).toBe(true) // archive reads only, no generation
  expect(vi.mocked(api).mock.calls.some(([p,i])=>p.endsWith('/runs')&&i?.method==='POST')).toBe(false)
 })
-it('generates unverified relations directly without approval controls',async()=>{
+it('allows a pending-scope section to finalize without generating relations',async()=>{
  mock();const base=vi.mocked(api).getMockImplementation()!
+ const pendingItem={...item,scope:'pending'}
+ const frozen={id:'section-final',run_id:'r',run_revision:4,snapshot:{unit,items:[pendingItem],checks:[],relations:[],run_id:'r',run_revision:4}}
  vi.mocked(api).mockImplementation(async(path,init)=>{
-  if(path==='/editor/runs/r/messages'&&init?.method==='POST')return {id:'m',candidate_id:null,action:'relations',status:'completed',error:'',response:'',model:{model:'test-model'},payload:{instruction:'生成关系',context_revision:3,uses_unsaved_body:false},result:{relations:[]}}
-  return base(path,init)
- })
- await open();fireEvent.click(screen.getByRole('tab',{name:'知识关系'}));fireEvent.click(screen.getByRole('button',{name:'生成知识关系'}))
- await screen.findByText('本轮没有生成关系，不代表知识之间没有连接。')
- expect(screen.queryByText('确认并采纳选中关系')).toBeNull()
- const sent=JSON.parse(vi.mocked(api).mock.calls.find(([p,i])=>p==='/editor/runs/r/messages'&&i?.method==='POST')![1]!.body as string)
- expect(sent.action).toBe('relations')
-})
-
-it('embeds the existing section draft without generating again and fixes reviewed relations with knowledge',async()=>{
- mock();const base=vi.mocked(api).getMockImplementation()!
- const item2={...item,id:'i2',knowledge_id:'k2',body:{...body,name:'函数定义'}}
- const sectionRun={...run,items:[item,item2]}
- const edge={source_id:'k',target_id:'k2',relation_type:'uses',reason:'原始关系依据',conditions:'满足非零条件',example:'用点的坐标代入'}
- const entry={id:'relation-msg',candidate_id:null,action:'relations',status:'completed',error:'',response:'',payload:{instruction:'生成关系',context_revision:3,uses_unsaved_body:false},model:{model:'test'},result:{relations:[edge]}}
- const frozen={id:'section-final',run_id:'r',run_revision:4,snapshot:{unit,items:[item,item2],checks:[],relations:[{id:'edge',body:edge}],editorial:{relations_teacher_confirmed:true},run_id:'r',run_revision:4}}
- vi.mocked(api).mockImplementation(async(path,init)=>{
-  if(path==='/editor/runs/r')return sectionRun
-  if(path==='/editor/runs/r/messages'&&init?.method==='POST')return entry
+  if(path==='/editor/runs/r')return {...run,items:[pendingItem]}
   if(path==='/editor/runs/r/finalize')return {id:'section-final'}
   if(path==='/editor/versions/section-final')return frozen
   return base(path,init)
  })
- const dirty=vi.fn();render(<EditorialKnowledgePage workflow initialUnitId="u" onDirtyChange={dirty}/>);
+ render(<EditorialKnowledgePage workflow initialUnitId="u" onDirtyChange={vi.fn()}/>);
  await screen.findByRole('region',{name:'知识正文'})
- expect(screen.queryByLabelText('已有知识单元')).toBeNull()
- expect(vi.mocked(api).mock.calls.every(([,i])=>!i?.method)).toBe(true)
- expect((screen.getByRole('button',{name:'形成终稿'}) as HTMLButtonElement).disabled).toBe(true)
- fireEvent.click(screen.getByRole('button',{name:'正文已核对，进入关系核对'}))
- fireEvent.click(screen.getByRole('button',{name:'生成知识关系'}))
- await screen.findByLabelText('关系1依据')
- fireEvent.change(screen.getByLabelText('关系1依据'),{target:{value:'教师修订的关系依据'}})
- await waitFor(()=>expect(dirty).toHaveBeenLastCalledWith(true))
- fireEvent.click(screen.getByLabelText(/我已审定本小节知识正文/));fireEvent.click(screen.getByRole('button',{name:'定稿本小节基础内容'}))
- await waitFor(()=>expect(vi.mocked(api).mock.calls.some(([p])=>p.endsWith('/finalize'))).toBe(true))
- const sent=JSON.parse(vi.mocked(api).mock.calls.find(([p])=>p.endsWith('/finalize'))![1]!.body as string)
- expect(sent.relation_message_id).toBe('relation-msg');expect(sent.relations[0].reason).toBe('教师修订的关系依据');expect(sent.revision).toBe(3)
+ expect(screen.queryByRole('tab',{name:'知识关系'})).toBeNull()
+ expect(screen.queryByLabelText('小节待定条目范围')).toBeNull()
+ fireEvent.click(screen.getByLabelText(/我已检查纳入条目/));fireEvent.click(screen.getByRole('button',{name:'形成终稿'}))
  await screen.findByRole('button',{name:'基于终稿继续修订'})
+ const sent=JSON.parse(vi.mocked(api).mock.calls.find(([p])=>p.endsWith('/finalize'))![1]!.body as string)
+ expect(sent).toEqual({revision:3,confirmed:true})
+ expect(vi.mocked(api).mock.calls.some(([p,i])=>p.endsWith('/messages')&&i?.method==='POST')).toBe(false)
+})
+it('shows previously reviewed relations as collapsed history without a new generation action',async()=>{
+ mock();const base=vi.mocked(api).getMockImplementation()!
+ vi.mocked(api).mockImplementation(async(path,init)=>path==='/editor/runs/r'?{...run,historical_relations:[{id:'old-edge',body:{source_id:'k',target_id:'k2',relation_type:'uses',reason:'历史使用理由',conditions:'历史条件',example:'历史例子'}}]}:base(path,init))
+ await open();expect(screen.getByText('历史知识关系（仅供参考）')).toBeTruthy()
+ expect(screen.queryByRole('button',{name:'生成知识关系'})).toBeNull()
+ expect(screen.getByText('历史使用理由')).toBeTruthy()
+ expect(vi.mocked(api).mock.calls.every(([,i])=>!i?.method)).toBe(true)
 })
 it('pauses after catalog generation for human selection instead of auto-expanding in the section workflow',async()=>{
  mock();const base=vi.mocked(api).getMockImplementation()!;let generated=false
@@ -129,7 +115,7 @@ it('pauses after catalog generation for human selection instead of auto-expandin
  fireEvent.click(screen.getByLabelText('选中整个知识清单'));fireEvent.click(screen.getByRole('button',{name:'生成选中知识正文'}))
  await waitFor(()=>expect(vi.mocked(api).mock.calls.some(([p])=>p.endsWith('/expand'))).toBe(true))
 })
-it('recognizes an old knowledge-only final as still needing section relations and makes no paid calls',async()=>{
+it('recognizes knowledge-only finals as complete without requiring relations or paid calls',async()=>{
  mock();const base=vi.mocked(api).getMockImplementation()!
  const old={id:'old-final',run_id:'r',run_revision:4,created_at:'2026-11-12',snapshot:{unit,items:[item],checks:[],relations:[],editorial:{relations_teacher_confirmed:false},run_id:'r',run_revision:4}}
  vi.mocked(api).mockImplementation(async(path,init)=>{
@@ -138,7 +124,7 @@ it('recognizes an old knowledge-only final as still needing section relations an
   return base(path,init)
  })
  render(<EditorialKnowledgePage workflow initialUnitId="u" onDirtyChange={vi.fn()}/>);
- await screen.findByText('4 小节定稿 · 知识已定稿，关系待补全')
+ await screen.findByText('3 基础知识定稿 · 已完成')
  expect(screen.getByRole('button',{name:'基于终稿继续修订'})).toBeTruthy()
  expect(vi.mocked(api).mock.calls.every(([,i])=>!i?.method)).toBe(true)
 })

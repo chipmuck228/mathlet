@@ -15,7 +15,7 @@ it('groups six workflow destinations and routes document review by category',asy
  vi.mocked(api).mockImplementation(async path=>path==='/documents'?docs:[])
  render(<App/>);await screen.findByText('standard.docx')
  const nav=screen.getByRole('navigation',{name:'工作区'})
- expect(within(nav).getAllByRole('button').map(b=>b.textContent)).toEqual(['资料包','原题核对','课标/考纲整理','知识与关系','题库研究','复习单元编制'])
+ expect(within(nav).getAllByRole('button').map(b=>b.textContent)).toEqual(['资料包','原题核对','课标/考纲整理','基础知识编制','题库研究','复习单元编制'])
  expect(within(nav).getByRole('heading',{name:'资料整理'})).toBeTruthy()
  expect(screen.queryByRole('button',{name:'题目与研究'})).toBeNull()
  for(const [i,category] of ['standard','exam','mock','term'].entries()){

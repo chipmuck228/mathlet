@@ -46,7 +46,16 @@ class Training(Strict):
     answer:str=Field(min_length=1,max_length=6000)
     reasoning:str=Field(min_length=1,max_length=6000)
     checkpoints:list[str]=Field(min_length=1,max_length=10)
+class KnowledgeConnection(Strict):
+    source_ref:str
+    target_ref:str
+    relation_type:Literal['prerequisite','derives','uses','contrast','representation']
+    explanation:str=Field(min_length=1,max_length=3000)
+    conditions:str=Field(min_length=1,max_length=3000)
+    example:str=Field(min_length=1,max_length=3000)
+
 class Composition(Strict):
+    knowledge_connections:list[KnowledgeConnection]=Field(default_factory=list,max_length=12)
     title:str=Field(min_length=1,max_length=200)
     introduction:str=Field(min_length=1,max_length=5000)
     goals:list[str]=Field(min_length=1,max_length=12)
@@ -57,7 +66,7 @@ class UnitBody(Composition):
     cards:list[Card]=Field(max_length=5)
     summary:str=Field(min_length=1,max_length=4000)
 class ReviewIssue(Strict):
-    section:Literal['introduction','goals','mappings','cards','training','summary']
+    section:Literal['introduction','goals','mappings','knowledge_connections','cards','training','summary']
     message:str=Field(min_length=1,max_length=3000)
     guidance:str=Field(min_length=1,max_length=3000)
 class Review(Strict):

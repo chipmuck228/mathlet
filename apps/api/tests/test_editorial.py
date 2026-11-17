@@ -78,7 +78,7 @@ def test_structure_range_remove_restore_and_order_are_revision_bound(client,monk
     run=client.post(url,json={'revision':run['revision'],'item_id':first['id'],'action':'restore'}).json()
     assert first['id'] not in run['removed']
     run=save(client,run,body=run['items'][0]['body']|{'positive_example':''},scope='pending').json()
-    assert any('正例' in x for x in run['final_blockers']) and any('适用范围' in x for x in run['final_blockers'])
+    assert any('正例' in x for x in run['final_blockers']) and not any('适用范围' in x for x in run['final_blockers'])
     assert client.post(f"/api/editor/runs/{run['id']}/finalize",json={'revision':run['revision'],'confirmed':True}).status_code==422
     run=client.post(url,json={'revision':run['revision'],'item_id':run['items'][0]['id'],'action':'remove'}).json()
     final=client.post(f"/api/editor/runs/{run['id']}/finalize",json={'revision':run['revision'],'confirmed':True})
@@ -229,3 +229,44 @@ def test_section_final_rejects_stale_relation_context_and_bad_endpoints(client,m
     response=client.post(url,json={'revision':changed['revision'],'confirmed':True,'relation_message_id':m2['id'],'relations':[]})
     assert response.status_code==201,response.text
     assert response.json()['snapshot']['relations']==[] and response.json()['snapshot']['editorial']['relations_teacher_confirmed']
+
+
+def test_unclassified_knowledge_finalizes_without_scope_or_relations_and_remains_unclassified(client,monkeypatch):
+    unit,run=setup(client);run=complete(client,run,monkeypatch)
+    current=client.get('/api/editor/runs/'+run['id']).json()
+    assert all(x['scope']=='pending' for x in current['items'])
+    assert not current['final_blockers']
+    first=current['items'][0]
+    # The new page saves text without inventing or resubmitting a teaching tier.
+    changed=client.put('/api/editor/runs/'+run['id']+'/items/'+first['id'],json={'revision':current['revision'],'item_revision':first['revision'],'body':first['body']|{'positive_example':'5x=10'},'review_note':'正文已核对，教学分层暂不设置'})
+    assert changed.status_code==200,changed.text
+    current=changed.json();assert current['items'][0]['scope']=='pending'
+    final=client.post('/api/editor/runs/'+run['id']+'/finalize',json={'revision':current['revision'],'confirmed':True});assert final.status_code==201,final.text
+    f=final.json();assert all(x['scope']=='pending' and x['review_state']=='approved' for x in f['snapshot']['items'])
+    assert f['snapshot']['relations']==[] and not f['snapshot']['editorial']['scope_classification_required']
+    assert not f['snapshot']['editorial']['relations_teacher_confirmed']
+    context=client.post('/api/research/contexts',json={'title':'未分层知识可用于匹配','version_ids':[f['id']]});assert context.status_code==201,context.text
+    assert len(context.json()['snapshot']['items'])==len(current['items'])
+
+
+def test_old_reviewed_edges_survive_as_references_after_new_text_final_without_relations(client,monkeypatch):
+    _,run=prepared(client,monkeypatch);msg,edge=section_relations(client,monkeypatch,run)
+    first=client.post('/api/editor/runs/'+run['id']+'/finalize',json={'revision':run['revision'],'confirmed':True,'relation_message_id':msg['id'],'relations':[edge]}).json()
+    original=client.get('/api/knowledge/versions/'+first['id']+'/download').content
+    draft=client.post('/api/editor/versions/'+first['id']+'/revise').json()
+    assert draft['historical_relations'][0]['body']==edge and draft['historical_relations'][0]['reference_only']
+    draft=save(client,draft,body=draft['items'][0]['body']|{'positive_example':'修改后的例子'}).json()
+    final=client.post('/api/editor/runs/'+draft['id']+'/finalize',json={'revision':draft['revision'],'confirmed':True});assert final.status_code==201,final.text
+    snapshot=final.json()['snapshot']
+    assert snapshot['relations']==[] and not snapshot['editorial']['relations_teacher_confirmed']
+    assert snapshot['historical_relations'][0]['body']==edge and snapshot['historical_relations'][0]['source_version']==first['id']
+    from mathlet.teaching import knowledge
+    with connect() as c:assert knowledge(c,final.json()['id'])['historical_relations'][0]['reference_only']
+    assert client.get('/api/knowledge/versions/'+first['id']+'/download').content==original
+
+
+def test_restore_historical_excluded_item_includes_it_without_calling_it_core(client,monkeypatch):
+    _,run=prepared(client,monkeypatch);run=save(client,run,scope='excluded').json();item=run['items'][0]
+    restored=client.post('/api/editor/runs/'+run['id']+'/arrange',json={'revision':run['revision'],'item_id':item['id'],'action':'restore'})
+    assert restored.status_code==200,restored.text
+    assert next(x for x in restored.json()['items'] if x['id']==item['id'])['scope']=='pending'

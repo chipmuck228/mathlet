@@ -22,6 +22,10 @@ def render_reader(snapshot):
             edge=relation['body'];source=know['version_id']+':'+edge['source_id'];target=know['version_id']+':'+edge['target_id']
             if source in names and target in names:parts.append('<p>'+links([source])+' → '+links([target])+'</p>'+text(edge['reason'])+text(edge['conditions'])+text(edge.get('example','')))
     parts.append('<h2 id="cards">二、连接与思路</h2>'+text(b['summary']))
+    if b.get('knowledge_connections'):
+        parts.append('<h3>知识之间怎样连接</h3>')
+        for edge in b['knowledge_connections']:
+            parts.append('<p>'+links([edge['source_ref']])+' → '+links([edge['target_ref']])+'</p>'+text(edge['explanation'])+'<strong>成立条件</strong>'+text(edge['conditions'])+'<strong>例子</strong>'+text(edge['example']))
     for card in b['cards']:
         parts.append('<article><h3>'+html.escape(card['title'])+'</h3><strong>看到什么线索</strong>'+listing(card['cues'])+text(card['structure'])+'<strong>可以怎样思考</strong>'+listing(card['steps'])+'<strong>使用边界</strong>'+listing(card['conditions'])+'<strong>其他可行路径</strong>'+listing(card['alternatives'])+'<strong>易错点</strong>'+listing(card['mistakes'])+'<p>回顾知识：'+links(card['knowledge_refs'])+'</p>')
         parts.append(details('比较哪些题目得出这一思路',''.join('<p><a href="#q-'+html.escape(e['analysis_id'])+'">'+html.escape(studies[e['analysis_id']]['question']['title'])+'</a> · 第'+str(e['step_index']+1)+'步</p>'+text(e['quote']) for e in card['evidence']))+'</article>')

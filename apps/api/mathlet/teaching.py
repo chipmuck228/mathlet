@@ -19,7 +19,7 @@ def sha(value):return hashlib.sha256(packed(value).encode()).hexdigest()
 def knowledge(c,version_id):
     frozen=json.loads(row(c,'knowledge_versions',version_id)['snapshot'])
     items=[{'ref':version_id+':'+x['knowledge_id'],'title':x['body']['name'],'unit_title':frozen['unit']['title'],'scope':x['scope'],'body':x['body']} for x in frozen['items'] if x['scope']!='excluded']
-    return {'version_id':version_id,'title':frozen['unit']['title'],'items':items,'relations':frozen.get('relations',[]),'editorial':frozen.get('editorial',{}),'official_coverage_verified':False}
+    return {'version_id':version_id,'title':frozen['unit']['title'],'items':items,'relations':frozen.get('relations',[]),'historical_relations':frozen.get('historical_relations',[]),'scope_classification_required':False,'editorial':frozen.get('editorial',{}),'official_coverage_verified':False}
 def teaching_current(c,meta):
     try:
         if not version_current(c,row(c,'knowledge_versions',meta['knowledge_version_id'])):return False

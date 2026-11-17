@@ -77,6 +77,12 @@ def checked(c,meta,body):
     chosen={key:studies[key] for key in selected}
     validate_cards({'cards':value['cards'],'summary':value['summary']},know,chosen)
     refs={k['ref'] for k in know['items']}
+    edges=set()
+    for edge in value['knowledge_connections']:
+        if edge['source_ref'] not in refs or edge['target_ref'] not in refs or edge['source_ref']==edge['target_ref']:raise ValueError('知识连接的两端须是本单元中不同的知识条目')
+        key=(edge['source_ref'],edge['target_ref'],edge['relation_type'])
+        if key in edges:raise ValueError('知识连接重复')
+        edges.add(key)
     phases=[t['phase'] for t in value['training']]
     if selected and not {'basic','thinking','solve'} <= set(phases):raise ValueError('训练须覆盖基础唤起、思路训练和独立解题')
     if selected and not phases.index('basic')<phases.index('thinking')<phases.index('solve'):raise ValueError('训练顺序须先基础唤起，再思路训练，最后独立解题')
@@ -248,7 +254,7 @@ def discuss(key:str,body:Discuss):
     with connect() as c:
         c.execute('BEGIN IMMEDIATE');r=row(c,'knowledge_runs',key);d=detail(c,r);revision(r,body.run_revision);revision(d,body.revision)
         if d['stale'] or r['status']!='completed' or not d['body']:raise HTTPException(409,'请等待草案完成并使用有效来源讨论')
-        if body.section not in {'introduction','goals','basics','mappings','cards','training','solutions','summary'}:raise HTTPException(422,'未知栏目')
+        if body.section not in {'introduction','goals','basics','mappings','cards','training','solutions','summary','knowledge_connections'}:raise HTTPException(422,'未知栏目')
         # Discussion may contain unsaved work, but can never mutate the saved manuscript.
         from .review_unit_worker import compact
         payload={'knowledge':d['knowledge'],'reviewed_studies':[compact(s) for s in d['studies']],'section':body.section,'current_section':body.body.model_dump().get(body.section),'instruction':body.instruction,'based_revision':body.revision,'uses_unsaved_body':body.body.model_dump()!=d['body']}

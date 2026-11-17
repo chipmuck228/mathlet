@@ -49,3 +49,14 @@ it('AI discussion sends the current unsaved section but never applies its reply 
  const c=vi.mocked(api).mock.calls.find(([p,i])=>p.endsWith('/discussions')&&i?.method==='POST')!;expect(JSON.parse(String(c[1]?.body)).body.introduction).toBe('尚未保存的导读')
  expect(vi.mocked(api).mock.calls.some(([,i])=>i?.method==='PUT')).toBe(false)
 })
+
+it('reads and edits knowledge connections inside unit composition rather than requiring a separate knowledge final',async()=>{
+ const withConnections={...unit,knowledge:{...unit.knowledge,items:[...unit.knowledge.items,{ref:'k2',title:'等式性质',scope:'pending',body:{statement:'等式两边同加一个数仍相等',conditions:'等式成立'}}]},body:{...body,knowledge_connections:[{source_ref:'k2',target_ref:'k1',relation_type:'uses',explanation:'加减消元使用等式性质',conditions:'同一组未知数满足两个方程',example:'两式相加消去y'}]}}
+ setup((path,init)=>path==='/review-units/runs/u1'&&!init?withConnections:undefined);await open()
+ fireEvent.click(screen.getByRole('button',{name:'知识连接'}));expect(screen.getByText('加减消元使用等式性质')).toBeTruthy()
+ fireEvent.click(screen.getByRole('button',{name:'编辑'}));fireEvent.change(screen.getByLabelText('为什么使用'),{target:{value:'教师修改的知识连接理由'}})
+ fireEvent.click(screen.getByRole('button',{name:'保存单元修改'}))
+ await waitFor(()=>expect(vi.mocked(api).mock.calls.some(([,i])=>i?.method==='PUT')).toBe(true))
+ const sent=JSON.parse(String(vi.mocked(api).mock.calls.find(([,i])=>i?.method==='PUT')![1]?.body))
+ expect(sent.body.knowledge_connections[0].explanation).toBe('教师修改的知识连接理由')
+})

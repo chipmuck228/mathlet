@@ -185,3 +185,21 @@ def test_unique_quote_relocates_wrong_step_but_does_not_guess_ambiguous_location
     fixed,note=bind(e,{'a':source});assert fixed['approach_id']=='path' and fixed['step_index']==0 and '唯一逐字引文' in note
     source['analysis']['approaches'][0]['steps'].append({'action':'唯一原文','reason':'依据'})
     fixed,note=bind(e,{'a':source});assert fixed is None and '无法唯一定位' in note
+
+
+def test_composition_generates_optional_knowledge_connections_in_same_call_and_teacher_edits_them(client,monkeypatch):
+    v,_,_=prepare(client,monkeypatch);r=start(client,v)
+    def connected(config,system,payload,tokens):
+        raw,usage=model(config,system,payload,tokens);value=json.loads(raw)
+        if '把知识终稿' in system:
+            refs=[k['ref'] for k in payload['knowledge']['items']]
+            value['knowledge_connections']=[{'source_ref':refs[6],'target_ref':refs[5],'relation_type':'uses','explanation':'加减消元使用等式性质。','conditions':'两个方程讨论同一组未知数，先使系数相同或互为相反数。','example':'x+y=5与x-y=1相加得到2x=6。'}]
+        return json.dumps(value),usage
+    monkeypatch.setattr(worker,'generate',connected);worker.run_one_knowledge();r=get(client,r)
+    assert r['status']=='completed',r['error']
+    assert len(r['calls'])==4 and r['body']['knowledge_connections']
+    b=json.loads(json.dumps(r['body']));b['knowledge_connections'][0]['target_ref']='foreign'
+    assert save(client,r,b).status_code==422
+    f=finish(client,r);assert f.status_code==201,f.text
+    html=client.get('/api/review-units/versions/'+f.json()['id']+'/download').text
+    assert '加减消元使用等式性质' in html and '先使系数相同或互为相反数' in html
