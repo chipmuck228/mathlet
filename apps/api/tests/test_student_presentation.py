@@ -159,3 +159,18 @@ def test_public_example_aliases_preserve_formula_symbols_and_avoid_ambiguous_pre
     assert 'b202' not in names and names['a7a66']=='例题 3'
     assert public_text('`a7a66`',names)=='例题 3'
     assert public_text(r'a7a66 与 b2020000；数学符号\(b2020000+1\)',names)==r'例题 3 与 例题 1；数学符号\(b2020000+1\)'
+
+
+def test_published_library_lists_only_immutable_final_deliveries(client,monkeypatch):
+    assert client.get('/api/review-units/published').json()==[]
+    r,_,_,_=complete(client,monkeypatch)
+    assert client.get('/api/review-units/published').json()==[]
+    f=finish(client,r).json()
+    listed=client.get('/api/review-units/published').json()
+    assert len(listed)==1 and listed[0]['id']==f['id']
+    assert listed[0]['title']==r['body']['title']
+    assert listed[0]['knowledge_count']==len(r['knowledge']['items'])
+    original=client.get('/api/review-units/versions/'+f['id']+'/download').content
+    client.post('/api/review-units/versions/'+f['id']+'/revise')
+    assert client.get('/api/review-units/published').json()==listed
+    assert client.get('/api/review-units/versions/'+f['id']+'/download').content==original

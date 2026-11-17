@@ -125,6 +125,21 @@ def detail(c,r):
     teacher_review=json.loads(row(c,'review_unit_versions',current_final['id'])['snapshot']).get('teacher_review') if current_final else None
     return {'id':r['id'],'status':r['status'],'stage':r['stage'],'run_revision':r['revision'],'revision':unit['revision'],'error':r['error'],'stale':not unit_current(c,meta),'title':json.loads(r['input_json'])['title'],'body':body,'checks':checks,'advice':review_advice(body,checks,know) if body else [],'knowledge':know,'studies':[study(c,key) for key in selected],'sources':meta['sources'],'representative_limit':meta['representative_limit'],'skipped_duplicates':meta.get('skipped_duplicates',0),'read_only':any(v['revision']==unit['revision'] for v in versions),'versions':versions,'presentation_task':presentation_task,'parent_version':unit['parent_version'],'teacher_review':teacher_review,'calls':[dict(v) for v in c.execute('SELECT step,status,error,reserved_tokens FROM knowledge_calls WHERE run_id=? ORDER BY rowid',(r['id'],))]}
 
+@router.get('/published')
+def published():
+    """List immutable teacher-finalized deliveries, never working manuscripts."""
+    with connect() as c:
+        result=[]
+        for v in c.execute('SELECT id,revision,created_at,snapshot FROM review_unit_versions ORDER BY created_at DESC,rowid DESC'):
+            snapshot=json.loads(v['snapshot'])
+            if not snapshot.get('teacher_review',{}).get('confirmed'):continue
+            body=snapshot['body']
+            result.append({'id':v['id'],'title':body['title'],'revision':v['revision'],
+                           'created_at':v['created_at'],'knowledge_count':len(snapshot['knowledge']['items']),
+                           'question_count':len(snapshot['studies']),
+                           'training_count':len(body.get('training',[]))})
+        return result
+
 @router.get('/catalog')
 def catalog():
     from .research import knowledge_versions
