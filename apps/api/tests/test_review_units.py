@@ -119,3 +119,69 @@ def test_no_match_is_explicit_does_not_force_cards_or_training(client,monkeypatc
     assert not r['body']['selected_analysis_ids'] and not r['body']['training'] and not r['body']['cards']
     assert any('尚未形成' in a['message'] for a in r['advice'])
     assert finish(client,r).status_code==201
+
+
+def test_generation_repairs_retyped_quotes_and_keeps_teacher_visible_diagnostics(client,monkeypatch):
+    v,_,_=prepare(client,monkeypatch);r=start(client,v)
+    def paraphrased(config,system,payload,tokens):
+        raw,usage=model(config,system,payload,tokens);value=json.loads(raw)
+        if '逐一判断' in system:
+            for m in value['mappings']:m['links'][0]['quote']='把两个方程相加消去未知数（AI概括）'
+        if '比较不同代表题' in system:
+            for e in value['cards'][0]['evidence']:e['quote']='相加消元的概述'
+        return json.dumps(value),usage
+    monkeypatch.setattr(worker,'generate',paraphrased);worker.run_one_knowledge();r=get(client,r)
+    assert r['status']=='completed',r['error']
+    assert len(r['body']['selected_analysis_ids'])==2 and r['body']['cards']
+    for m in r['body']['mappings']:
+        s=next(s for s in r['studies'] if s['id']==m['analysis_id'])
+        assert m['links'][0]['quote']==s['analysis']['approaches'][0]['steps'][0]['action']
+        assert any('AI概括' in text and '不代表知识关联已验证' in text for text in m['gaps'])
+    assert any('引文定位核对' in a['message'] for a in r['advice'])
+    assert finish(client,r).status_code==201
+
+
+def test_unlocatable_one_question_does_not_stop_other_questions(client,monkeypatch):
+    v,_,_=prepare(client,monkeypatch);r=start(client,v)
+    def unlocatable(config,system,payload,tokens):
+        raw,usage=model(config,system,payload,tokens);value=json.loads(raw)
+        if '逐一判断' in system:value['mappings'][0]['links'][0].update(approach_id='nonexistent',step_index=99,quote='没有这样的原文')
+        return json.dumps(value),usage
+    monkeypatch.setattr(worker,'generate',unlocatable);worker.run_one_knowledge();r=get(client,r)
+    assert r['status']=='completed',r['error']
+    first=r['body']['mappings'][0];assert first['relevance']=='uncertain' and not first['links']
+    assert len(r['body']['selected_analysis_ids'])==1 and r['body']['training']
+    assert any('证据待定位' in text for text in first['gaps'])
+
+
+def test_retry_revalidates_saved_quote_failure_without_repaying_mapping_call(client,monkeypatch):
+    from mathlet.review_units import validate_mappings
+    v,_,_=prepare(client,monkeypatch);r=start(client,v)
+    def paraphrased(config,system,payload,tokens):
+        raw,usage=model(config,system,payload,tokens);value=json.loads(raw)
+        if '逐一判断' in system:
+            for m in value['mappings']:m['links'][0]['quote']='曾经导致旧校验失败的概括'
+        return json.dumps(value),usage
+    import mathlet.review_unit_worker as unit_worker
+    actual=unit_worker.bind_mappings
+    monkeypatch.setattr(worker,'generate',paraphrased)
+    # Reproduce a historical failure using the original strict generation validator.
+    monkeypatch.setattr(unit_worker,'bind_mappings',lambda value,know,studies:validate_mappings(value,know,studies))
+    worker.run_one_knowledge();r=get(client,r);assert r['status']=='failed' and '逐字引用' in r['error']
+    monkeypatch.setattr(unit_worker,'bind_mappings',actual)
+    def remaining(config,system,payload,tokens):
+        assert '逐一判断' not in system,'Mapping must be recovered from the existing response'
+        return model(config,system,payload,tokens)
+    monkeypatch.setattr(worker,'generate',remaining)
+    retry=client.post('/api/review-units/runs/'+r['id']+'/retry',json={'revision':r['revision'],'run_revision':r['run_revision']});assert retry.status_code==200,retry.text
+    worker.run_one_knowledge();r=get(client,r);assert r['status']=='completed',r['error']
+    assert r['calls'][0]['status']=='revalidated' and len([x for x in r['calls'] if x['step']=='unit:mapping:1'])==1
+
+
+def test_unique_quote_relocates_wrong_step_but_does_not_guess_ambiguous_locations():
+    from mathlet.review_unit_evidence import bind
+    source={'id':'a','question':{'title':'定位测试'},'analysis':{'approaches':[{'id':'path','steps':[{'action':'唯一原文','reason':'依据'}]}]}}
+    e={'analysis_id':'a','approach_id':'wrong','step_index':9,'quote':'唯一原文'}
+    fixed,note=bind(e,{'a':source});assert fixed['approach_id']=='path' and fixed['step_index']==0 and '唯一逐字引文' in note
+    source['analysis']['approaches'][0]['steps'].append({'action':'唯一原文','reason':'依据'})
+    fixed,note=bind(e,{'a':source});assert fixed is None and '无法唯一定位' in note

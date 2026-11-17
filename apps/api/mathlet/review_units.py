@@ -91,7 +91,7 @@ def review_advice(body,checks,know):
     for k in know['items']:
         if k['ref'] not in used:advice.append({'section':'mappings','message':k['title']+'：本次题库暂无应用证据。','guidance':'保留基础复习；可补充代表题。未匹配不表示该知识不重要或可以删去。'})
     for m in body['mappings']:
-        for gap in m['gaps']:advice.append({'section':'mappings','message':gap,'guidance':'核对该题的知识边界，可修改映射或排除该题；不自动增改知识终稿。'})
+        for gap in m['gaps']:advice.append({'section':'mappings','message':gap,'guidance':'对照所指原题与研究步骤，检查关联解释和成立条件；可编辑关联或由教师认可。未定位证据的题目保留待判断，不影响其他题目生成。' if gap.startswith(('引文定位核对','证据待定位')) else '核对该题的知识边界，可修改映射或排除该题；不自动增改知识终稿。'})
         if m['relevance']=='uncertain':advice.append({'section':'mappings','message':m['reason'],'guidance':'在知识映射中核对具体证据；可保留为未纳入或修改关联，教师整体确认即可。'})
     for card in body['cards']:
         for doubt in card['doubts']:advice.append({'section':'cards','message':doubt,'guidance':'核对归纳边界，修改思路卡或由教师判断是否适用；不必再次调用AI。'})

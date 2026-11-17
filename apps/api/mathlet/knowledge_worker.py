@@ -70,6 +70,7 @@ def call(run, config, step, task, payload, max_tokens, validator, *, system_prom
             eligible=(step.startswith('details:') and error=='展开结果改变了清单的名称或类型，请重试') or error.startswith(('Invalid \\escape','Invalid \\uXXXX escape','[MODEL_JSON_ESCAPE]','[MODEL_JSON_FORMAT]'))
             eligible=eligible or (step.startswith('exam:structure') and any(message in error for message in ['题目定位终点必须在起点之后','原文中未找到定位文字']))
             eligible=eligible or (step=='exam:structure' and 'ExamPlan' in error and 'string_too_long' in error and bool(re.search(r'questions\.\d+\.title',error)))
+            eligible=eligible or (step.startswith(('unit:mapping:','unit:cards')) and any(message in error for message in ['证据必须逐字引用','证据引用的解法或步骤不存在','跨题思路卡至少需要两道不同题']))
             if not eligible: continue
             try:
                 decoded,notes=parse_model_json(attempt['raw_response']);recovered=validator(decoded)
