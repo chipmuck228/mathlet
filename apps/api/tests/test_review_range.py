@@ -20,7 +20,7 @@ def document(client):
     with ZipFile(data, "w") as z:
         z.writestr("word/document.xml", '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>' +
                    ''.join(f'<w:p><w:r><w:t>{s}</w:t></w:r></w:p>' for s in ['题目一', '题目二', '题目三']) + '</w:body></w:document>')
-    result = client.post('/api/documents', files={'file': ('paper.docx', data.getvalue())}).json()
+    result = client.post('/api/documents?category=mock', files={'file': ('paper.docx', data.getvalue())}).json()
     assert run_one()
     blocks = client.get(f"/api/documents/{result['id']}/blocks").json()
     return result['id'], blocks

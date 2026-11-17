@@ -17,7 +17,7 @@ def client(tmp_path, monkeypatch):
         yield client
 
 def upload(client):
-    doc = client.post('/api/documents', files={'file': ('test.docx', docx_bytes())}).json()['id']
+    doc = client.post('/api/documents?category=mock', files={'file': ('test.docx', docx_bytes())}).json()['id']
     assert run_one()
     return doc
 
@@ -83,7 +83,7 @@ def test_view_jobs_fail_independently_and_retry_without_changing_sources(client,
 def test_pdf_is_served_unchanged_and_unknown_doc_rejected(client):
     stream=io.BytesIO(); writer=PdfWriter(); writer.add_blank_page(width=300,height=400); writer.write(stream)
     raw=stream.getvalue()
-    doc=client.post('/api/documents',files={'file':('test.pdf',raw)}).json()['id']
+    doc=client.post('/api/documents?category=mock',files={'file':('test.pdf',raw)}).json()['id']
     status = client.get(f'/api/documents/{doc}/original-view').json()
     assert status['status'] == 'ready' and status['pages'] == 1 and not status['converted']
     assert client.get(f'/api/documents/{doc}/original-view.pdf').content == raw

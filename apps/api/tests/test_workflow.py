@@ -89,7 +89,7 @@ def test_persistence_and_escaped_export(client):
 
 
 def test_bad_file_is_failed_job_and_can_retry(client):
-    r = client.post("/api/documents", files={"file": ("broken.docx", b"not zip")})
+    r = client.post("/api/documents?category=mock", files={"file": ("broken.docx", b"not zip")})
     assert r.status_code == 201
     assert run_one()
     jobs = client.get("/api/jobs").json()
@@ -99,9 +99,9 @@ def test_bad_file_is_failed_job_and_can_retry(client):
 
 
 def test_local_origin_and_file_validation(client):
-    assert client.post("/api/documents", files={"file": ("x.exe", b"x")}).status_code == 415
-    assert client.post("/api/documents", files={"file": ("empty.pdf", b"")}).status_code == 400
-    assert client.post("/api/documents", headers={"Origin": "https://unrelated.example"}, files={"file": ("x.docx", docx_bytes())}).status_code == 403
+    assert client.post("/api/documents?category=mock", files={"file": ("x.exe", b"x")}).status_code == 415
+    assert client.post("/api/documents?category=mock", files={"file": ("empty.pdf", b"")}).status_code == 400
+    assert client.post("/api/documents?category=mock", headers={"Origin": "https://unrelated.example"}, files={"file": ("x.docx", docx_bytes())}).status_code == 403
     assert client.get("/api/documents/../../assets/a.png").status_code == 404
 
 
@@ -109,7 +109,7 @@ def test_pdf_page_render_and_scan_warning(client):
     writer = PdfWriter()
     writer.add_blank_page(width=200, height=200)
     buf = io.BytesIO(); writer.write(buf)
-    r = client.post("/api/documents", files={"file": ("scan.pdf", buf.getvalue())})
+    r = client.post("/api/documents?category=mock", files={"file": ("scan.pdf", buf.getvalue())})
     assert run_one()
     blocks = client.get(f"/api/documents/{r.json()['id']}/blocks").json()
     assert len(blocks) == 1

@@ -29,6 +29,8 @@ def context_current(c,context):
 def question_current(c,question):
     payload=json.loads(question['payload'])
     for source in payload['sources']:
+        document=c.execute('SELECT status,category FROM documents WHERE id=?',(source['document_id'],)).fetchone()
+        if not document or document['status']=='deleted' or document['category']!=source['category']:return False
         current=c.execute('SELECT text,verified FROM blocks WHERE id=?',(source['id'],)).fetchone()
         if not current or hashlib.sha256(current['text'].encode()).hexdigest()!=source['hash']:return False
         if source['verified'] and not current['verified']:return False

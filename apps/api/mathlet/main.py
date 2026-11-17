@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile, Query
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.exceptions import RequestValidationError
@@ -67,11 +67,11 @@ def health():
 @app.get("/api/documents")
 def documents():
     with connect() as c:
-        return [dict(r) for r in c.execute("SELECT * FROM documents ORDER BY created_at DESC")]
+        return [dict(r) for r in c.execute("SELECT * FROM documents WHERE status!='deleted' ORDER BY created_at DESC")]
 
 
 @app.post("/api/documents", status_code=201)
-async def upload(file: UploadFile = File(...), category: Literal["unknown", "standard", "textbook", "exam", "mock", "term"] = "unknown"):
+async def upload(file: UploadFile = File(...), category: Literal["standard", "textbook", "exam", "mock", "term"] = Query(...)):
     name = Path((file.filename or "document").replace("\\", "/")).name[:200]
     kind = Path(name).suffix.lower().lstrip(".")
     if kind not in {"docx", "pdf"}:
@@ -100,10 +100,51 @@ async def upload(file: UploadFile = File(...), category: Literal["unknown", "sta
     return {"id": document_id, "job_id": job_id}
 
 
+class DocumentCategory(BaseModel):
+    category: Literal["standard", "textbook", "exam", "mock", "term"]
+
+@app.put("/api/documents/{document_id}/category")
+def classify_document(document_id: str, body: DocumentCategory):
+    with connect() as c:
+        c.execute("BEGIN IMMEDIATE")
+        document=get_row(c,"documents",document_id)
+        if document['status']=='deleted':raise HTTPException(410,'原始资料已删除')
+        if document['category'] not in {'unknown',body.category}:raise HTTPException(409,'已有明确类别的资料不能直接改成另一来源类别；请重新上传，避免改变既有题目来源')
+        c.execute('UPDATE documents SET category=? WHERE id=?',(body.category,document_id))
+        return dict(get_row(c,'documents',document_id))
+
+@app.delete("/api/documents/{document_id}")
+def delete_document(document_id: str):
+    # Preserve immutable snapshots and FK identities; remove original bytes and live access.
+    temporary=None;folder=data_dir()/'documents'/document_id
+    try:
+        with connect() as c:
+            c.execute('BEGIN IMMEDIATE');document=get_row(c,'documents',document_id)
+            if document['status']=='deleted':return {'ok':True}
+            if c.execute("SELECT 1 FROM jobs WHERE document_id=? AND status='running'",(document_id,)).fetchone():raise HTTPException(409,'原文件正在提取或生成预览，请等待当前任务完成后删除')
+            if folder.exists():
+                temporary=folder.with_name('.deleting-'+document_id+'-'+uid());folder.rename(temporary)
+            c.execute("UPDATE documents SET status='deleted' WHERE id=?",(document_id,))
+            c.execute("UPDATE jobs SET status='cancelled',message='原始资料已删除',updated_at=? WHERE document_id=? AND status='queued'",(now(),document_id))
+            c.execute('UPDATE blocks SET verified=0,revision=revision+1 WHERE document_id=?',(document_id,))
+            # Old manually approved scaffolds must not retain live approval after source removal.
+            for draft in c.execute('SELECT id,source_ids FROM drafts').fetchall():
+                ids=json.loads(draft['source_ids'])
+                if ids and c.execute('SELECT 1 FROM blocks WHERE document_id=? AND id IN ('+','.join('?' for _ in ids)+')',[document_id,*ids]).fetchone():
+                    c.execute('UPDATE drafts SET approved_revision=NULL WHERE id=?',(draft['id'],))
+    except Exception:
+        if temporary and temporary.exists():temporary.rename(folder)
+        raise
+    if temporary:
+        try:shutil.rmtree(temporary)
+        except OSError:return {'ok':True,'warning':'资料已移出工作台，但本地文件清理失败。请检查 data/documents 下的 .deleting 目录；已有终稿保留。'}
+    return {'ok':True}
+
+
 @app.get("/api/jobs")
 def jobs():
     with connect() as c:
-        return [dict(r) for r in c.execute("SELECT jobs.*,documents.name FROM jobs JOIN documents ON documents.id=jobs.document_id ORDER BY jobs.created_at DESC LIMIT 100")]
+        return [dict(r) for r in c.execute("SELECT jobs.*,documents.name FROM jobs JOIN documents ON documents.id=jobs.document_id WHERE documents.status!='deleted' ORDER BY jobs.created_at DESC LIMIT 100")]
 
 
 @app.post("/api/jobs/{job_id}/retry")
@@ -111,6 +152,7 @@ def retry(job_id: str):
     with connect() as c:
         c.execute("BEGIN IMMEDIATE")
         row = get_row(c, "jobs", job_id)
+        if get_row(c,"documents",row["document_id"])["status"]=="deleted":raise HTTPException(410,"原始资料已删除，不能重试")
         if row["status"] != "failed":
             raise HTTPException(409, "仅失败任务可以重试")
         if row["kind"] == "original_view":
@@ -125,7 +167,8 @@ def retry(job_id: str):
 @app.get("/api/documents/{document_id}/blocks")
 def blocks(document_id: str):
     with connect() as c:
-        get_row(c, "documents", document_id)
+        document=get_row(c, "documents", document_id)
+        if document["status"]=="deleted":raise HTTPException(410,"原始资料已删除")
         return [block_json(r) for r in c.execute("SELECT * FROM blocks WHERE document_id=? ORDER BY ordinal", (document_id,))]
 
 
@@ -133,6 +176,7 @@ def blocks(document_id: str):
 def original(document_id: str):
     with connect() as c:
         row = get_row(c, "documents", document_id)
+    if row["status"]=="deleted":raise HTTPException(410,"原始资料已删除；已有定稿文件保留")
     return FileResponse(data_dir() / "documents" / document_id / ("original." + row["kind"]), filename=row["name"])
 
 
@@ -159,6 +203,7 @@ def apply_block_edits(c, changes):
     old_rows = {}
     for key, body in changes:
         old = get_row(c, "blocks", key)
+        if get_row(c,"documents",old["document_id"])["status"]=="deleted":raise HTTPException(410,"原始资料已删除，不能覆盖历史证据")
         require_revision(old, body.revision)
         old_rows[key] = old
     changed = [(key,body) for key,body in changes if body.text != old_rows[key]["text"] or bool(body.verified) != bool(old_rows[key]["verified"])]

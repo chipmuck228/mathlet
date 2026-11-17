@@ -24,7 +24,7 @@ def upload(client):
     xml+='</w:p></w:body></w:document>'
     b=io.BytesIO()
     with ZipFile(b,'w') as z:z.writestr('word/document.xml',xml)
-    r=client.post('/api/documents',files={'file':('math.docx',b.getvalue())});assert r.status_code==201
+    r=client.post('/api/documents?category=mock',files={'file':('math.docx',b.getvalue())});assert r.status_code==201
     assert run_one();doc=r.json()['id']
     return doc,client.get(f'/api/documents/{doc}/blocks').json()[0]
 

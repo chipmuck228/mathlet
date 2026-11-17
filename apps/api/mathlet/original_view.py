@@ -35,6 +35,7 @@ def folder_for(document_id):
         document = c.execute("SELECT * FROM documents WHERE id=?", (document_id,)).fetchone()
         if document is None:
             raise HTTPException(404, "资料不存在")
+    if document["status"]=="deleted":raise HTTPException(410,"原始资料已删除；已有定稿文件保留")
     return dict(document), data_dir() / "documents" / document_id
 
 

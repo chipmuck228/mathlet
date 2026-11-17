@@ -70,3 +70,11 @@ it('collapses AI import, removes the directory importer and retains old plans',a
  expect(screen.queryByText('导入教材目录')).toBeNull();expect(screen.queryByLabelText('目录来源')).toBeNull()
  fireEvent.click(screen.getByRole('button',{name:'2 主题目标与知识生成'}));expect(screen.getByRole('button',{name:'打开本小节基础内容'})).toBeTruthy()
 })
+
+it('hands confirmed curriculum topics to the single knowledge page instead of embedding another editor',async()=>{
+ vi.mocked(api).mockImplementation(async path=>path==='/plans'?[plan]:{id:'knowledge-unit'})
+ const open=vi.fn();render(<PlanningPage organizeOnly documents={[]} openSource={vi.fn()} openDraft={vi.fn()} openKnowledge={open}/>)
+ await choose();fireEvent.click(screen.getByRole('button',{name:'2 主题目标'}));fireEvent.click(screen.getByRole('button',{name:'按此主题进入知识与关系'}))
+ await waitFor(()=>expect(open).toHaveBeenCalledWith('knowledge-unit'))
+ expect(screen.queryByLabelText('小节基础内容工作流')).toBeNull()
+})

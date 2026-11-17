@@ -126,10 +126,10 @@ def plan_json(c, record):
     changes = []
     requirements = {r["source_id"] for r in result["payload"]["requirements"] if r.get("origin","official_excerpt")=="official_excerpt"}
     for key, revision in result["payload"]["source_revisions"].items():
-        source = c.execute("SELECT revision,text,verified FROM blocks WHERE id=?", (key,)).fetchone()
+        source = c.execute("SELECT b.revision,b.text,b.verified,d.status AS document_status FROM blocks b JOIN documents d ON d.id=b.document_id WHERE b.id=?", (key,)).fetchone()
         digest = result["payload"].get("source_hashes", {}).get(key)
         content_changed = source is not None and (hashlib.sha256(source["text"].encode()).hexdigest() != digest if digest else source["revision"] != revision)
-        if source is None or content_changed or (key in requirements and not source["verified"]):
+        if source is None or source["document_status"]=="deleted" or content_changed or (key in requirements and not source["verified"]):
             changes.append(key)
     result["stale_sources"] = changes
     result["confirmed"] = result["confirmed_revision"] == result["revision"] and not changes
