@@ -105,6 +105,8 @@ def detail(c,run):
     result['removed']=m['removed'];result['parent_version']=m['parent_version']
     result['final_version']=next((dict(x) for x in c.execute('SELECT id,created_at FROM knowledge_versions WHERE run_id=? AND run_revision=?',(run['id'],run['revision']))),None)
     result['historical_relations']=historical_relations(c,m)
+    from .knowledge_coverage import view
+    result['topic_coverage']=view(c,run)
     result['final_blockers']=[]
     for item in result['items']:
         if item['id'] in m['removed'] or item['scope']=='excluded':continue
@@ -200,6 +202,9 @@ def finalize(run_id:str,body:Finalize):
         ids={x['id'] for x in items};items=[candidate_json(row(c,'knowledge_candidates',x['id'])) for x in items]
         snapshot={'schema_version':1,'unit':unit_json(c,row(c,'knowledge_units',run['unit_id'])),'model':json.loads(run['model_json']),'input':json.loads(run['input_json']),'run_id':run_id,'run_revision':run['revision'],'items':items,'reviewed_count':len(items),'selected_count':len(data['items']),'official_coverage_verified':False,'basis':'model_prior_and_teacher_review','checks':data['checks'],'relations':reviewed_relations,'historical_relations':data['historical_relations'],
                   'editorial':{'whole_manuscript_confirmed':True,'scope_classification_required':False,'parent_version':data['parent_version'],'removed_ids':[x['id'] for x in data['items'] if x['id'] not in ids],'ai_relations_included':body.relation_message_id is not None,'relations_teacher_confirmed':body.relation_message_id is not None,'relation_message_id':body.relation_message_id}}
+        from .knowledge_coverage import coverage,catalog_bindings
+        snapshot['topic_coverage']=coverage(c,run)
+        snapshot['topic_catalog_bindings']=catalog_bindings(c,run)
         version_id=uid();c.execute('INSERT INTO knowledge_versions VALUES(?,?,?,?,?,?)',(version_id,run['unit_id'],run_id,run['revision'],packed(snapshot),now()))
         return {'id':version_id,'snapshot':snapshot}
 
@@ -215,6 +220,10 @@ def revise_version(version_id:str):
         from .knowledge import origin_stale
         if origin_stale(c,unit) or snapshot['unit']['revision']!=unit['revision']:raise HTTPException(409,'终稿对应的内容规划或单元范围已变化，请先核对新范围，旧终稿仍可阅读')
         run_id=uid();catalog=[{'id':x['knowledge_id'],'name':x['body']['name'],'kind':x['body']['kind'],'reason':'基于终稿继续修订'} for x in snapshot['items'] if x['scope']!='excluded']
+        bindings={v['knowledge_id']:v for v in snapshot.get('topic_catalog_bindings',[])}
+        for entry in catalog:
+            binding=bindings.get(entry['id'],{})
+            entry.update(objective_ids=binding.get('objective_ids',[]),required_content_indices=binding.get('required_content_indices',[]))
         c.execute("INSERT INTO knowledge_runs(id,unit_id,input_revision,input_json,model_json,status,stage,catalog,selected_ids,checks,created_at,updated_at) VALUES(?,?,?,?,?,'completed','completed',?,?,?,?,?)",(run_id,unit['id'],unit['revision'],packed(snapshot['input']),packed(snapshot['model']),packed(catalog),packed([x['id'] for x in catalog]),packed(snapshot.get('checks',[])),now(),now()))
         for item in snapshot['items']:
             if item['scope']=='excluded':continue

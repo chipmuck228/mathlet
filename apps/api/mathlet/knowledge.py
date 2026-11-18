@@ -59,6 +59,9 @@ def current(c, run):
     if snapshot.get('research_task'):
         from .research import sources_current
         return sources_current(c,snapshot['research_task'])
+    if snapshot.get('objective_coverage_task'):
+        from .knowledge_coverage import task_current
+        return task_current(c,snapshot['objective_coverage_task'])
     if snapshot.get('topic_spec_task'):
         from .topic_specs import task_current
         return task_current(c,snapshot['topic_spec_task'])
@@ -222,10 +225,11 @@ def start_run(unit_id:str,body:RunInput):
             if base['unit_id']!=unit_id or not current(c,base): raise HTTPException(409,'原候选的单元范围已变化，请重新生成清单')
             catalog=json.loads(base['catalog'])
             if not catalog: raise HTTPException(422,'原任务尚无清单，请先重试或重新生成清单')
-        snapshot={'schema_version':1,'prompt_version':'knowledge-v1','title':unit['title'],'chapters':json.loads(unit['chapters']),
+        snapshot={'schema_version':1,'prompt_version':'knowledge-v2','title':unit['title'],'chapters':json.loads(unit['chapters']),
             'target':unit['target'],'notes':unit['notes'],'max_items':body.max_items,
             'basis':'model_prior','official_coverage_verified':False,'origin':json.loads(unit['origin']),
-            'learning_requirements':json.loads(unit['origin']).get('learning_requirements',[])}
+            'learning_requirements':json.loads(unit['origin']).get('learning_requirements',[]),
+            'topic_spec':json.loads(unit['origin']).get('topic_spec')}
         key=uid();state='awaiting_selection' if catalog else 'queued'
         c.execute('INSERT INTO knowledge_runs(id,unit_id,input_revision,input_json,model_json,status,stage,catalog,base_run_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)',
             (key,unit_id,unit['revision'],packed(snapshot),packed(public_provider(provider)),state,'details' if catalog else 'catalog',packed(catalog),body.base_run_id,now(),now()))
@@ -351,8 +355,13 @@ def freeze(run_id:str,body:RevisionInput):
         snapshot={'schema_version':1,'unit':unit_json(c,row(c,'knowledge_units',run['unit_id'])), 'model':json.loads(run['model_json']), 'input':json.loads(run['input_json']), 'run_id':run_id,'run_revision':run['revision'],
             'items':items,'reviewed_count':len(items),'selected_count':len(json.loads(run['selected_ids'])),
             'official_coverage_verified':False,'basis':'model_prior_and_teacher_review','checks':normalized_checks(c,run)}
+        from .knowledge_coverage import coverage,catalog_bindings
+        snapshot['topic_coverage']=coverage(c,run)
+        snapshot['topic_catalog_bindings']=catalog_bindings(c,run)
         from .knowledge_actions import relations
         included_ids={x['knowledge_id'] for x in included}
+        if included_ids!={i['knowledge_id'] for i in snapshot['topic_coverage']['items']}:snapshot['topic_coverage']['state']='stale'
+        snapshot['topic_catalog_bindings']=[b for b in snapshot['topic_catalog_bindings'] if b['knowledge_id'] in included_ids]
         snapshot['relations']=[edge for edge in relations(c,run_id) if edge['usable'] and edge['body']['source_id'] in included_ids and edge['body']['target_id'] in included_ids]
         key=uid();c.execute('INSERT INTO knowledge_versions VALUES(?,?,?,?,?,?)',(key,run['unit_id'],run_id,run['revision'],packed(snapshot),now()))
         return {'id':key,'snapshot':snapshot}

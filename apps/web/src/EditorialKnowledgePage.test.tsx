@@ -128,3 +128,15 @@ it('recognizes knowledge-only finals as complete without requiring relations or 
  expect(screen.getByRole('button',{name:'基于终稿继续修订'})).toBeTruthy()
  expect(vi.mocked(api).mock.calls.every(([,i])=>!i?.method)).toBe(true)
 })
+
+it('takes a coverage gap into the existing discussion and waits for the teacher to send',async()=>{
+ mock();const previous=vi.mocked(api).getMockImplementation()!
+ const target={state:'current',source_hash:'hash',result_id:'out',targets:[{id:'goal:g',kind:'objective',text:'解释同一分支的比较条件'}],items:[{knowledge_id:'k',name:body.name,fields:['statement']}],result:{origin:'ai',error:'',generated_at:'2026-11-18',report:{rows:[{target_id:'goal:g',status:'partial',links:[{knowledge_id:'k',fields:['statement'],explanation:'有性质表述'}],gap:'还缺少跨象限的反例',guidance:'补充反例并解释比较条件'}],issues:[],teacher_note:''}},tasks:[]}
+ vi.mocked(api).mockImplementation(async(path,init)=>path==='/editor/runs/r'?{...structuredClone(run),topic_coverage:target}:previous(path,init))
+ render(<EditorialKnowledgePage onDirtyChange={vi.fn()}/>);
+ await screen.findByRole('option',{name:'反比例函数'});fireEvent.change(screen.getByLabelText('已有知识单元'),{target:{value:'u'}})
+ await screen.findByText('解释同一分支的比较条件')
+ fireEvent.click(screen.getByRole('button',{name:'带入右侧AI补充'}));expect((screen.getByLabelText('讨论方式') as HTMLSelectElement).value).toBe('supplement')
+ expect((screen.getByLabelText('给 AI 的问题或要求') as HTMLTextAreaElement).value).toContain('还缺少跨象限的反例')
+ expect(vi.mocked(api).mock.calls.some(([,i])=>i?.method==='POST')).toBe(false)
+})
