@@ -487,6 +487,9 @@ app.include_router(topic_spec_router)
 from .knowledge_coverage import router as knowledge_coverage_router
 app.include_router(knowledge_coverage_router)
 
+from .unit_goals import router as unit_goal_router
+app.include_router(unit_goal_router)
+
 web = ROOT / "apps" / "web" / "dist"
 if web.is_dir():
     app.mount("/", StaticFiles(directory=web, html=True), name="web")

@@ -26,7 +26,23 @@ def render_reader(snapshot):
     def band(title,content,tone='blue',symbol='idea'):return '<div class="band tone-'+tone+'"><h4>'+icon(symbol)+html.escape(title)+'</h4>'+content+'</div>'
     def chapter(number,title,anchor):return '<div class="chapter" id="'+anchor+'"><span class="chapter-number">0'+str(number)+'</span><h2>'+html.escape(title)+'</h2></div>'
     def images(q):return ''.join('<img alt="原题配图" src="'+html.escape(a['data_url'],quote=True)+'">' for a in q['assets'] if a.get('data_url','').startswith('data:image/png;base64,'))
-    parts=['<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>'+html.escape(public(b['title']))+'</title><style>'+CSS+'</style></head><body><header class="cover"><p class="eyebrow">MATHLET / 数学复习小册子 · '+('教师审定复习单元' if confirmed else '未审定草案，仅供核查')+'</p><h1>'+html.escape(public(b['title']))+'</h1>'+text(p['introduction'] if p else learner(b['introduction'],'先看看下面的知识，再试着找出题目给了什么条件、要你求什么。'))+'<div class="goals"><h4>'+icon('check')+' 读完以后，试试这些事</h4>'+listing([goal_text(g) for g in p['goals']] if p else [x for x in (learner(g) for g in b['goals']) if x] or ['试着用自己的话说清概念和条件。','做完题后，说说每一步为什么成立。'])+'</div><p class="muted text">先自己想一想，卡住了再打开提示。做完后再翻到后面，对照答案和思考过程。</p><nav class="reading-route"><a href="#basics">先懂知识</a><a href="#cards">找到连接</a><a href="#practice">动笔试试</a><a href="#solutions">对照思路</a></nav></header>'+chapter(1,'先把知识弄明白','basics')]
+    def goal_routes():
+        from .unit_goals import state,student_goal
+        coverage=b.get('goal_coverage')
+        if not coverage or not coverage.get('report') or state(b,know)['state']!='current':return ''
+        rows=[]
+        objective_ids={t['id'] for t in state(b,know)['targets'] if t['kind']=='objective'}
+        for r in coverage['report']['rows']:
+            title=learner(student_goal(r.get('student_goal',''),b,know))
+            if r['target_id'] not in objective_ids or not title:continue
+            destinations=[]
+            valid_refs=[ref for ref in r['knowledge_refs'] if ref in anchors]
+            if valid_refs:destinations.append('先看：'+links(valid_refs))
+            destinations.extend('<a href="#thought-'+str(i+1)+'">思路卡 '+str(i+1)+'</a>' for i in r['card_indices'] if 0<=i<len(b['cards']))
+            destinations.extend('<a href="#training-'+str(i+1)+'">'+PHASES[b['training'][i]['phase']]+' · 训练 '+str(i+1)+'</a>' for i in r['training_indices'] if 0<=i<len(b['training']))
+            if destinations:rows.append('<li>'+text(title)+'<p>'+ ' · '.join(destinations)+'</p></li>')
+        return details('想练哪一件事？按目标找知识和练习','<ol class="goal-routes">'+''.join(rows)+'</ol>') if rows else ''
+    parts=['<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>'+html.escape(public(b['title']))+'</title><style>'+CSS+'</style></head><body><header class="cover"><p class="eyebrow">MATHLET / 数学复习小册子 · '+('教师审定复习单元' if confirmed else '未审定草案，仅供核查')+'</p><h1>'+html.escape(public(b['title']))+'</h1>'+text(p['introduction'] if p else learner(b['introduction'],'先看看下面的知识，再试着找出题目给了什么条件、要你求什么。'))+'<div class="goals"><h4>'+icon('check')+' 读完以后，试试这些事</h4>'+listing([goal_text(g) for g in p['goals']] if p else [x for x in (learner(g) for g in b['goals']) if x] or ['试着用自己的话说清概念和条件。','做完题后，说说每一步为什么成立。'])+'</div><p class="muted text">先自己想一想，卡住了再打开提示。做完后再翻到后面，对照答案和思考过程。</p><nav class="reading-route"><a href="#basics">先懂知识</a><a href="#cards">找到连接</a><a href="#practice">动笔试试</a><a href="#solutions">对照思路</a></nav>'+goal_routes()+'</header>'+chapter(1,'先把知识弄明白','basics')]
     for index,k in enumerate(know['items']):
         v=k['body'];copy=copies.get(k['ref']);parts.append('<article class="knowledge" id="'+anchors[k['ref']]+'"><div class="entry-head"><span class="entry-number">K'+str(index+1).zfill(2)+'</span><h3>'+html.escape(public(k['title']))+'</h3></div>')
         if copy:parts.append(band('先这样理解',text(copy['plain_explanation']),'blue','book'))
@@ -44,7 +60,7 @@ def render_reader(snapshot):
     parts.append(chapter(2,'看到线索，找到思路','cards')+text(p.get('summary') if p and p.get('summary') else '把下面的知识和例题放在一起看：哪些条件提示你使用哪种方法？先说说你的想法，再对照解题过程。'))
     for edge in b.get('knowledge_connections',[]):parts.append(band('这两个知识，怎么一起用？','<p>'+links([edge['source_ref']])+' → '+links([edge['target_ref']])+'</p>'+text(edge['explanation'])+'<strong>先看条件</strong>'+text(edge['conditions'])+'<strong>放进例子里看</strong>'+text(edge['example']),'blue','link'))
     for index,card in enumerate(b['cards']):
-        parts.append('<article class="thought"><h3>'+icon('idea')+' '+html.escape(learner(card['title'],'一起找思路'))+'</h3>')
+        parts.append('<article class="thought" id="thought-'+str(index+1)+'"><h3>'+icon('idea')+' '+html.escape(learner(card['title'],'一起找思路'))+'</h3>')
         if index in card_copy:parts.append(text(card_copy[index]['student_lead']))
         parts.append(band('看到这些，先停一下想想',learning_list(card['cues']),'purple','eye')+text(learner(card['structure']))+'<h4>可以这样往下想</h4><ol class="steps">'+''.join('<li>'+text(learner(s,'回到例题的解题过程中，看看这一步用了哪些条件。'))+'</li>' for s in card['steps'])+'</ol>'+band('什么时候能这样做？',listing(card['conditions']),'amber','alert'))
         if card['alternatives']:parts.append(details('还可以走别的路吗？',learning_list(card['alternatives'])))
@@ -52,7 +68,7 @@ def render_reader(snapshot):
         parts.append('<p>想不起来时，回看：'+links(card['knowledge_refs'])+'</p>'+details('比较哪些题目得出这一思路',''.join('<p><a href="#'+question_anchors[e['analysis_id']]+'">'+html.escape(public_names[e['analysis_id']])+'</a> · 第'+str(e['step_index']+1)+'步</p>'+text(learner(e['quote'])) for e in card['evidence']))+'</article>')
     parts.append(chapter(3,'动笔试试，慢慢放开提示','practice'));shown_questions=set()
     for n,t in enumerate(b['training']):
-        parts.append('<article class="exercise"><span class="badge">'+PHASES[t['phase']]+'</span><h3>'+str(n+1)+' · '+html.escape(learner(t['title'],'试着独立思考'))+'</h3><small>'+('围绕已审定原题的训练' if t['kind']=='original' else '自编迁移练习，非原真题')+'</small>')
+        parts.append('<article class="exercise" id="training-'+str(n+1)+'"><span class="badge">'+PHASES[t['phase']]+'</span><h3>'+str(n+1)+' · '+html.escape(learner(t['title'],'试着独立思考'))+'</h3><small>'+('围绕已审定原题的训练' if t['kind']=='original' else '自编迁移练习，非原真题')+'</small>')
         if n in training_copy:parts.append('<div class="student-lead">'+text(training_copy[n]['student_lead'])+'</div>')
         if t['kind']=='original':
             for key in t['source_analysis_ids']:

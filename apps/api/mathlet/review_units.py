@@ -88,6 +88,12 @@ def checked(c,meta,body):
     if selected and not phases.index('basic')<phases.index('thinking')<phases.index('solve'):raise ValueError('训练顺序须先基础唤起，再思路训练，最后独立解题')
     for t in value['training']:
         if not set(t['source_analysis_ids'])<=set(selected) or not set(t['knowledge_refs'])<=refs:raise ValueError('训练须引用本单元代表题与知识终稿')
+    from .unit_goals import targets,source_hash as goal_hash,validate_report as validate_goal_report
+    target_ids={t['id'] for t in targets(know)}
+    for entry in value['cards']+value['training']:
+        if len(set(entry['target_ids']))!=len(entry['target_ids']) or not set(entry['target_ids'])<=target_ids:raise ValueError('思路卡或训练关联了不存在或重复的主题目标')
+    goal_report=value.get('goal_coverage')
+    if goal_report and goal_report.get('report') and goal_report['source_hash']==goal_hash(value,know):validate_goal_report(goal_report['report'],value,know)
     from .student_presentation import current_presentation,validate
     if current_presentation(value,know):validate(value['presentation'],value,know)
     return value
@@ -109,6 +115,11 @@ def review_advice(body,checks,know):
         if m['relevance']=='uncertain':advice.append({'section':'mappings','message':m['reason'],'guidance':'在知识映射中核对具体证据；可保留为未纳入或修改关联，教师整体确认即可。'})
     for card in body['cards']:
         for doubt in card['doubts']:advice.append({'section':'cards','message':doubt,'guidance':'核对归纳边界，修改思路卡或由教师判断是否适用；不必再次调用AI。'})
+    from .unit_goals import state as goal_state
+    goal_info=goal_state(body,know)
+    if goal_info['targets'] and goal_info['state']!='current':advice.append({'section':'goal_coverage','message':'主题目标与训练对应尚未完成检查，或已随正文变化失效。','guidance':'可在目标与训练对应中直接编辑或重新AI检查；这不阻断教师定稿。'})
+    for r in goal_info['row_states']:
+        if r['status']!='arranged':advice.append({'section':'goal_coverage','message':next(t['text'] for t in goal_info['targets'] if t['id']==r['target_id'])+'：目标路径仍有待判断或补充。','guidance':'查看对应表中的知识、真题、思路与训练缺口；允许本次仅作基础复习，教师整体判断。'})
     return advice
 
 def detail(c,r):
@@ -121,9 +132,18 @@ def detail(c,r):
     presentation_task=c.execute('SELECT k.id,k.status,k.revision,k.error,t.revision AS base_revision FROM review_unit_presentation_tasks t JOIN knowledge_runs k ON k.id=t.run_id WHERE t.unit_id=? ORDER BY k.created_at DESC,k.rowid DESC LIMIT 1',(r['id'],)).fetchone()
     presentation_task=dict(presentation_task) if presentation_task else None
     if presentation_task:presentation_task['calls']=[dict(x) for x in c.execute('SELECT step,status,error,reserved_tokens FROM knowledge_calls WHERE run_id=? ORDER BY rowid',(presentation_task['id'],))]
+    goal_task=None
+    for child in c.execute('SELECT * FROM knowledge_runs WHERE base_run_id=? ORDER BY created_at DESC,rowid DESC',(r['id'],)):
+        goal_meta=json.loads(child['input_json']).get('unit_goal_task')
+        if goal_meta:
+            goal_task={k:child[k] for k in ['id','status','revision','error']};goal_task['base_revision']=goal_meta['parent_revision'];break
+    from .unit_goals import state as goal_state
     current_final=next((v for v in versions if v['revision']==unit['revision']),None)
     teacher_review=json.loads(row(c,'review_unit_versions',current_final['id'])['snapshot']).get('teacher_review') if current_final else None
-    return {'id':r['id'],'status':r['status'],'stage':r['stage'],'run_revision':r['revision'],'revision':unit['revision'],'error':r['error'],'stale':not unit_current(c,meta),'title':json.loads(r['input_json'])['title'],'body':body,'checks':checks,'advice':review_advice(body,checks,know) if body else [],'knowledge':know,'studies':[study(c,key) for key in selected],'sources':meta['sources'],'representative_limit':meta['representative_limit'],'skipped_duplicates':meta.get('skipped_duplicates',0),'read_only':any(v['revision']==unit['revision'] for v in versions),'versions':versions,'presentation_task':presentation_task,'parent_version':unit['parent_version'],'teacher_review':teacher_review,'calls':[dict(v) for v in c.execute('SELECT step,status,error,reserved_tokens FROM knowledge_calls WHERE run_id=? ORDER BY rowid',(r['id'],))]}
+    goal_info=goal_state(body,know) if body else {'state':'not_checked','targets':[],'foundation':[],'row_states':[]}
+    sources_valid=unit_current(c,meta)
+    if not sources_valid:goal_info.update(state='stale',row_states=[])
+    return {'id':r['id'],'status':r['status'],'stage':r['stage'],'run_revision':r['revision'],'revision':unit['revision'],'error':r['error'],'stale':not sources_valid,'title':json.loads(r['input_json'])['title'],'body':body,'checks':checks,'advice':review_advice(body,checks,know) if body else [],'knowledge':know,'studies':[study(c,key) for key in selected],'sources':meta['sources'],'representative_limit':meta['representative_limit'],'skipped_duplicates':meta.get('skipped_duplicates',0),'read_only':any(v['revision']==unit['revision'] for v in versions),'versions':versions,'goal_context':goal_info,'goal_coverage_task':goal_task,'presentation_task':presentation_task,'parent_version':unit['parent_version'],'teacher_review':teacher_review,'calls':[dict(v) for v in c.execute('SELECT step,status,error,reserved_tokens FROM knowledge_calls WHERE run_id=? ORDER BY rowid',(r['id'],))]}
 
 @router.get('/published')
 def published():
@@ -176,7 +196,9 @@ def start(body:Start):
         # Reserve the full automatic pipeline explicitly, including two attempts per step.
         from .student_presentation import plan as presentation_plan
         reading_plan=presentation_plan(know)
-        calls=len(groups)+3+len(reading_plan);budget=len(groups)*7000+18000+sum(tokens for _,tokens in reading_plan)
+        from .unit_goals import targets
+        goal_steps=(len(targets(know))+5)//6
+        calls=len(groups)+3+len(reading_plan)+goal_steps;budget=len(groups)*7000+18000+sum(tokens for _,tokens in reading_plan)+goal_steps*5000
         config=config.model_copy(update={'max_calls':max(config.max_calls,calls*2),'output_token_budget':max(config.output_token_budget,budget*2)})
         key=uid();unit=uid();snapshot={'title':know['title']+' · 复习单元','chapters':[],'review_unit_task':meta}
         from .model_provider import public_provider
@@ -200,6 +222,9 @@ def save(key:str,body:Save):
         c.execute('BEGIN IMMEDIATE');r=row(c,'knowledge_runs',key);d=detail(c,r);revision(r,body.run_revision);revision(d,body.revision)
         if d['stale'] or d['read_only'] or r['status']!='completed':raise HTTPException(409,'依据已变化、任务未完成或为只读终稿，请先继续修订')
         candidate=body.body.model_dump()
+        if candidate.get('goal_coverage') and candidate['goal_coverage']!=(d['body'] or {}).get('goal_coverage'):
+            from .unit_goals import source_hash as goal_hash
+            candidate['goal_coverage'].update(source_hash=goal_hash(candidate,d['knowledge']),origin='teacher',model=None,generated_at=now(),error='')
         if candidate.get('presentation') and candidate['presentation']!=(d['body'] or {}).get('presentation'):
             from .student_presentation import source_hash
             candidate['presentation']['source_hash']=source_hash(candidate,d['knowledge'])
@@ -288,10 +313,13 @@ def discuss(key:str,body:Discuss):
     with connect() as c:
         c.execute('BEGIN IMMEDIATE');r=row(c,'knowledge_runs',key);d=detail(c,r);revision(r,body.run_revision);revision(d,body.revision)
         if d['stale'] or r['status']!='completed' or not d['body']:raise HTTPException(409,'请等待草案完成并使用有效来源讨论')
-        if body.section not in {'introduction','goals','basics','mappings','cards','training','solutions','summary','knowledge_connections','presentation'}:raise HTTPException(422,'未知栏目')
+        if body.section not in {'goal_coverage','introduction','goals','basics','mappings','cards','training','solutions','summary','knowledge_connections','presentation'}:raise HTTPException(422,'未知栏目')
         # Discussion may contain unsaved work, but can never mutate the saved manuscript.
         from .review_unit_worker import compact
         payload={'knowledge':d['knowledge'],'reviewed_studies':[compact(s) for s in d['studies']],'section':body.section,'current_section':(body.body.presentation.model_dump().get(body.section) if body.body.presentation and body.section in {'introduction','goals','summary'} else body.body.model_dump().get(body.section)),'instruction':body.instruction,'based_revision':body.revision,'uses_unsaved_body':body.body.model_dump()!=d['body']}
+        if body.section=='goal_coverage':
+            from .unit_goals import context as goal_context
+            payload['goal_context']=goal_context(body.body.model_dump(),d['knowledge'],json.loads(r['input_json'])['review_unit_task']['sources'])
         if len(packed(payload))>220000:raise HTTPException(422,'当前栏目与依据过长，请缩小单元的代表题范围后讨论；未发送模型')
         signature=digest({'unit':key,'payload':payload})
         old=c.execute('SELECT * FROM review_unit_discussions WHERE request_key=?',(body.request_key,)).fetchone()
@@ -312,7 +340,8 @@ def retry_budget(c,run,know,meta=None):
     if meta is not None:
         from .review_unit_worker import batches,compact
         groups=batches([compact(study(c,s['id'])) for s in meta['sources']])
-        steps=[(f'unit:mapping:{i+1}',7000) for i in range(len(groups))]+[('unit:cards',6500),('unit:training',8500),('unit:review',3000)]+steps
+        from .unit_goals import targets
+        steps=[(f'unit:mapping:{i+1}',7000) for i in range(len(groups))]+[('unit:cards',6500),('unit:training',8500),('unit:review',3000)]+[(f'unit:goals:{i+1}',5000) for i in range((len(targets(know))+5)//6)]+steps
     successful={x['step'] for x in c.execute("SELECT step FROM knowledge_calls WHERE run_id=? AND status IN ('succeeded','revalidated')",(run['id'],))}
     count,reserved=c.execute('SELECT count(*),coalesce(sum(reserved_tokens),0) FROM knowledge_calls WHERE run_id=?',(run['id'],)).fetchone()
     remaining=[tokens for step,tokens in steps if step not in successful];config=json.loads(run['model_json'])

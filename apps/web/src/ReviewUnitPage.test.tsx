@@ -101,3 +101,24 @@ it('uses student introduction and summary while retaining editorial reports in a
  const sent=JSON.parse(String(vi.mocked(api).mock.calls.find(([,i])=>i?.method==='PUT')![1]?.body))
  expect(sent.body.presentation.summary).toBe('学生可以直接使用的思考提示');expect(sent.body.summary).toBe(editorial)
 })
+
+it('opens target correspondence and queues a revision-bound check without rerunning the research bank',async()=>{
+ let queued=false
+ const goalContext={state:'not_checked',targets:[{id:'goal:g1',kind:'objective',text:'能选择消元方法'}],foundation:[],row_states:[]}
+ setup(path=>path==='/review-units/runs/u1'?{...unit,goal_context:goalContext,goal_coverage_task:queued?{id:'goal-task',status:'queued',revision:1,error:'',base_revision:1}:null}:path==='/review-units/runs/u1/goal-coverage'?(queued=true,{id:'goal-task'}):undefined)
+ await open();fireEvent.click(screen.getByRole('button',{name:'目标与训练对应'}))
+ fireEvent.click(screen.getByRole('button',{name:'AI检查／更新目标对应'}));await screen.findByRole('button',{name:'目标对应检查中…'})
+ const request=vi.mocked(api).mock.calls.find(([path])=>path.endsWith('/goal-coverage'))!
+ expect(JSON.parse(String(request[1]!.body))).toEqual({revision:1,run_revision:2})
+ expect(screen.getByRole('button',{name:'编辑'}).hasAttribute('disabled')).toBe(true)
+ expect(vi.mocked(api).mock.calls.some(([p])=>p==='/corpus/studies')).toBe(false)
+})
+
+it('keeps the unsaved whole-unit review note when queuing a goal correspondence update',async()=>{
+ const goalContext={state:'not_checked',targets:[{id:'goal:g1',kind:'objective',text:'能选择消元方法'}],foundation:[],row_states:[]}
+ setup(path=>path==='/review-units/runs/u1'?{...unit,goal_context:goalContext}:path.endsWith('/goal-coverage')?{id:'goal-task'}:undefined)
+ await open();fireEvent.change(screen.getByLabelText('单元审核说明'),{target:{value:'稍后补充建模题，保留这份说明'}})
+ fireEvent.click(screen.getByRole('button',{name:'目标与训练对应'}));fireEvent.click(screen.getByRole('button',{name:'AI检查／更新目标对应'}))
+ await waitFor(()=>expect(vi.mocked(api).mock.calls.some(([path])=>path.endsWith('/goal-coverage'))).toBe(true))
+ expect((screen.getByLabelText('单元审核说明') as HTMLTextAreaElement).value).toBe('稍后补充建模题，保留这份说明')
+})

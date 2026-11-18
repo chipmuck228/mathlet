@@ -47,9 +47,16 @@ SYSTEM='''你是Mathlet的“学生阅读表达Agent”，负责一本给初中�
 只返回严格JSON，不返回HTML、CSS、SVG、Markdown布局或审核通过标记。历史标签不代表学生必须掌握的层级。'''+MODEL_GUIDANCE
 
 def source_hash(body,know):
-    core={k:v for k,v in body.items() if k not in {'presentation','summary','introduction'}}
+    # Goal bindings and teacher coverage reports are editorial metadata. Updating
+    # them alone must not invalidate an otherwise unchanged student explanation.
+    def clean(value):
+        if isinstance(value,dict):return {k:clean(v) for k,v in value.items() if k not in {'target_ids','goal_coverage'}}
+        if isinstance(value,list):return [clean(v) for v in value]
+        return value
+    core=clean({k:v for k,v in body.items() if k not in {'presentation','summary','introduction','goal_coverage'}})
     core.setdefault('knowledge_connections',[])
-    return digest(json.dumps({'body':core,'knowledge':know},ensure_ascii=False,sort_keys=True))
+    reading_knowledge={k:v for k,v in know.items() if k not in {'topic_spec','topic_coverage','topic_catalog_bindings'}}
+    return digest(json.dumps({'body':core,'knowledge':reading_knowledge},ensure_ascii=False,sort_keys=True))
 
 def current_presentation(body,know):
     value=body.get('presentation')
@@ -126,7 +133,7 @@ def generate_presentation(run,config,body,know,ensure):
             ids=[x[index] for x in result.model_dump()[key]]
             if len(ids)!=len(set(ids)) or set(ids)!=set(range(len(body[key]))):raise ValueError('学生导语须与原思路卡、训练一一对应')
         return result
-    opening=editorial_call('unit:presentation:opening:v2','把单元开场与目标写成学生愿意读的短句，并写summary作为学生版思路导读：告诉学生看到题目可以先想什么、怎样连接知识，不要写归纳过程报告或教师审核说明。给每张思路卡、每项训练写一句引导学生动手思考的导语。不能改写或替换原题及原训练任务；不能提前泄露答案。索引从0起，须逐一对应，无思路卡或训练时相应数组为空。返回结构：'+packed(Opening.model_json_schema()),{'title':clean(body['title']),'knowledge_titles':[clean(k['title']) for k in know['items']],'learning_goals':[narrative(g) for g in body['goals'] if narrative(g)],'cards':[{'card_index':i,'title':narrative(c['title']),'cues':[narrative(x) for x in c['cues']],'structure':narrative(c['structure']),'conditions':[narrative(x) for x in c['conditions']]} for i,c in enumerate(body['cards'])],'training':[{'training_index':i,'title':narrative(t['title']),'prompt':narrative(t['prompt'])} for i,t in enumerate(body['training'])]},4000,parse_opening)
+    opening=editorial_call('unit:presentation:opening:v2','把单元开场与目标写成学生愿意读的短句，并写summary作为学生版思路导读：告诉学生看到题目可以先想什么、怎样连接知识，不要写归纳过程报告或教师审核说明。给每张思路卡、每项训练写一句引导学生动手思考的导语。不能改写或替换原题及原训练任务；不能提前泄露答案。索引从0起，须逐一对应，无思路卡或训练时相应数组为空。返回结构：'+packed(Opening.model_json_schema()),{'title':clean(body['title']),'knowledge_titles':[clean(k['title']) for k in know['items']],'learning_goals':[narrative(g) for g in body['goals'] if narrative(g)],'topic_goals':[narrative(g['text']) for g in (know.get('topic_spec') or {}).get('objectives',[]) if narrative(g['text'])],'cards':[{'card_index':i,'title':narrative(c['title']),'cues':[narrative(x) for x in c['cues']],'structure':narrative(c['structure']),'conditions':[narrative(x) for x in c['conditions']]} for i,c in enumerate(body['cards'])],'training':[{'training_index':i,'title':narrative(t['title']),'prompt':narrative(t['prompt'])} for i,t in enumerate(body['training'])]},4000,parse_opening)
     value=opening.model_dump()|{'knowledge':copies,'source_hash':source_hash(body,know),'agent':{'run_id':run['id'],'model':config.model,'base_url':config.base_url,'prompt_version':'student-reading-v2'}}
     return validate(value,body,know)
 

@@ -59,6 +59,9 @@ def current(c, run):
     if snapshot.get('research_task'):
         from .research import sources_current
         return sources_current(c,snapshot['research_task'])
+    if snapshot.get('unit_goal_task'):
+        from .unit_goals import task_current
+        return task_current(c,snapshot['unit_goal_task'])
     if snapshot.get('objective_coverage_task'):
         from .knowledge_coverage import task_current
         return task_current(c,snapshot['objective_coverage_task'])

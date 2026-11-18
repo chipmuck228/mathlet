@@ -3,6 +3,7 @@ from typing import Literal
 from pydantic import Field
 from .research_models import Strict
 from .student_presentation import Presentation
+from .unit_goals import GoalCoverage
 
 class Evidence(Strict):
     analysis_id:str
@@ -23,6 +24,7 @@ class Mapping(Strict):
 class MappingBatch(Strict):
     mappings:list[Mapping]
 class Card(Strict):
+    target_ids:list[str]=Field(default_factory=list,max_length=70)
     title:str=Field(min_length=1,max_length=160)
     cues:list[str]=Field(min_length=1,max_length=10)
     structure:str=Field(min_length=1,max_length=4000)
@@ -37,6 +39,7 @@ class CardSet(Strict):
     cards:list[Card]=Field(max_length=5)
     summary:str=Field(min_length=1,max_length=4000)
 class Training(Strict):
+    target_ids:list[str]=Field(default_factory=list,max_length=70)
     phase:Literal['basic','thinking','solve','transfer']
     kind:Literal['original','designed']
     title:str=Field(min_length=1,max_length=160)
@@ -62,13 +65,14 @@ class Composition(Strict):
     goals:list[str]=Field(min_length=1,max_length=12)
     training:list[Training]=Field(max_length=16)
 class UnitBody(Composition):
+    goal_coverage:GoalCoverage|None=None
     presentation:Presentation|None=None
     mappings:list[Mapping]
     selected_analysis_ids:list[str]=Field(max_length=8)
     cards:list[Card]=Field(max_length=5)
     summary:str=Field(min_length=1,max_length=4000)
 class ReviewIssue(Strict):
-    section:Literal['introduction','goals','mappings','knowledge_connections','presentation','cards','training','summary']
+    section:Literal['goal_coverage','introduction','goals','mappings','knowledge_connections','presentation','cards','training','summary']
     message:str=Field(min_length=1,max_length=3000)
     guidance:str=Field(min_length=1,max_length=3000)
 class Review(Strict):

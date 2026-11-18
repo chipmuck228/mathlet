@@ -170,6 +170,10 @@ def run_one_knowledge():
             from .research_worker import run_research
             run_research(run,config,snapshot)
             return True
+        if snapshot.get('unit_goal_task'):
+            from .unit_goals import run_task
+            run_task(run,config,snapshot)
+            return True
         if snapshot.get('objective_coverage_task'):
             from .knowledge_coverage import run_check
             run_check(run,config,snapshot)
