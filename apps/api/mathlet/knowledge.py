@@ -59,6 +59,9 @@ def current(c, run):
     if snapshot.get('research_task'):
         from .research import sources_current
         return sources_current(c,snapshot['research_task'])
+    if snapshot.get('topic_spec_task'):
+        from .topic_specs import task_current
+        return task_current(c,snapshot['topic_spec_task'])
     if snapshot.get('planning_task'):
         from .planning_ai import sources_current
         return sources_current(c,snapshot)
@@ -163,6 +166,7 @@ class PlanUnitInput(BaseModel):
 def from_plan(body: PlanUnitInput):
     from .planning import plan_json
     with connect() as c:
+        c.execute('BEGIN IMMEDIATE')
         plan=row(c,'plans',body.plan_id);revision(plan,body.plan_revision)
         dbplan=c.execute('SELECT * FROM plans WHERE id=?',(body.plan_id,)).fetchone()
         if not plan_json(c,dbplan)['confirmed']: raise HTTPException(409,'请先确认当前内容规划')
@@ -181,6 +185,9 @@ def from_plan(body: PlanUnitInput):
         key=uid();origin={'plan_id':body.plan_id,'unit_id':body.unit_id,'plan_revision':body.plan_revision}
         origin['learning_requirements']=[{'text':r['text'],'source_id':r['source_id'],'origin':r.get('origin','official_excerpt')} for r in payload['requirements'] if body.unit_id in r['unit_ids']]
         origin['domain']=source.get('volume','')
+        if source.get('topic_spec'):
+            origin['topic_spec']=source['topic_spec']
+            origin['topic_spec_review']={'plan_revision':body.plan_revision,'reviewer':plan['reviewer'],'basis':'teacher_confirmed_plan','official_coverage_verified':False}
         c.execute('INSERT INTO knowledge_units(id,title,chapters,target,notes,origin,created_at) VALUES(?,?,?,?,?,?,?)',
             (key,body_unit.title,packed(body_unit.chapters),body_unit.target,body_unit.notes,packed(origin),now()))
         return unit_json(c,row(c,'knowledge_units',key))

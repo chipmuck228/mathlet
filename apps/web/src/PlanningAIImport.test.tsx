@@ -38,3 +38,21 @@ it('opens a completed candidate only on request and respects unsaved parent plan
  fireEvent.click(screen.getByRole('button',{name:'打开生成规划进行核对'}))
  await waitFor(()=>expect(onOpen).toHaveBeenCalledWith('p'))
 })
+
+it('combines a curriculum summary and textbook directory with both preview revisions',async()=>{
+ const second={...doc,id:'d2',name:'教材目录.docx',category:'textbook'}
+ vi.mocked(api).mockImplementation(async(path,init)=>{
+  if(path==='/knowledge/provider')return {ready:true,model:'test',base_url:'https://model.example',output_token_budget:30000}
+  if(path==='/planning-ai/runs')return init?.method?task:[]
+  if(path==='/documents/d/blocks')return [{id:'b1',document_id:'d',text:'学习要求',locator:'段1',revision:3,verified:true}]
+  if(path==='/documents/d2/blocks')return [{id:'b2',document_id:'d2',text:'教材目录',locator:'段2',revision:5,verified:false}]
+  throw Error(path)
+ })
+ render(<PlanningAIImport documents={[doc,second]} disabled={false} onOpen={vi.fn()}/>);
+ fireEvent.change(screen.getByLabelText('AI 规划来源资料'),{target:{value:'d'}})
+ fireEvent.change(screen.getByLabelText('联合参考资料（可选：教材目录或另一份课标归纳）'),{target:{value:'d2'}})
+ await screen.findByText('教材目录');fireEvent.click(screen.getByLabelText(/确认向已保存模型发送该资料/));fireEvent.click(screen.getByRole('button',{name:'AI 构建待审核规划'}))
+ await waitFor(()=>expect(vi.mocked(api).mock.calls.some(([,i])=>i?.method==='POST')).toBe(true))
+ const sent=JSON.parse(vi.mocked(api).mock.calls.find(([,i])=>i?.method==='POST')![1]!.body as string)
+ expect(sent.additional_document_ids).toEqual(['d2']);expect(sent.source_revisions).toEqual({b1:3,b2:5})
+})

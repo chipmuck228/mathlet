@@ -9,12 +9,13 @@ from .knowledge import packed, row, current
 from .model_provider import load_provider, public_provider
 
 router=APIRouter(prefix='/api/planning-ai',tags=['AI planning'])
-PROMPT='planning-ai-v1'
+PROMPT='planning-ai-v2'
 class Strict(BaseModel):
     model_config=ConfigDict(extra='forbid',str_strip_whitespace=True)
 class Start(Strict):
     document_id:str
-    source_revisions:dict[str,int]=Field(min_length=1,max_length=200)
+    additional_document_ids:list[str]=Field(default_factory=list,max_length=4)
+    source_revisions:dict[str,int]=Field(min_length=1,max_length=1000)
     title:str=Field(min_length=1,max_length=120)
     instruction:str=Field(default='',max_length=3000)
     max_topics:int=Field(default=80,ge=1,le=120)
@@ -39,9 +40,12 @@ class Proposal(Strict):
 
 def sources_current(c,snapshot):
     meta=snapshot['planning_task']
-    document=c.execute('SELECT status FROM documents WHERE id=?',(meta['document_id'],)).fetchone()
-    if not document or document['status']!='ready': return False
-    live={x['id']:x for x in c.execute('SELECT id,text FROM blocks WHERE document_id=?',(meta['document_id'],))}
+    document_ids=meta.get('document_ids',[meta['document_id']])
+    live={}
+    for key in document_ids:
+        document=c.execute('SELECT status FROM documents WHERE id=?',(key,)).fetchone()
+        if not document or document['status']!='ready':return False
+        live.update({x['id']:x for x in c.execute('SELECT id,text FROM blocks WHERE document_id=?',(key,))})
     return set(live)=={x['id'] for x in meta['sources']} and all(hashlib.sha256(live[x['id']]['text'].encode()).hexdigest()==x['hash'] for x in meta['sources'])
 
 
@@ -58,22 +62,29 @@ def task_json(c,run):
 def start(body:Start):
     config=load_provider()
     if not body.consent: raise HTTPException(422,'请确认发送导入资料的全部提取正文和规划要求')
-    if not config.api_key or not config.model: raise HTTPException(422,'请先在“知识与关系”保存模型服务配置')
+    if not config.api_key or not config.model: raise HTTPException(422,'请先在“基础知识编制”保存模型服务配置')
     if config.output_token_budget<8000: raise HTTPException(422,'AI规划需要至少8000输出token预留预算，请调整模型配置')
     with connect() as c:
         c.execute('BEGIN IMMEDIATE');document=row(c,'documents',body.document_id)
-        if document['status']!='ready': raise HTTPException(409,'资料尚未完成读取')
-        blocks=[dict(x) for x in c.execute('SELECT * FROM blocks WHERE document_id=? ORDER BY ordinal',(body.document_id,))]
-        if {x['id']:x['revision'] for x in blocks}!=body.source_revisions: raise HTTPException(409,'来源在预览后发生变化，请刷新待发送正文后重新确认')
-        if not blocks or not any(x['text'].strip() for x in blocks): raise HTTPException(422,'没有可供模型读取的正文；扫描资料需先补录或OCR核对')
-        if len(blocks)>200 or sum(len(x['text']) for x in blocks)>90000: raise HTTPException(422,'资料超出本轮范围，请拆分文件后导入；不会截断正文后冒充完整规划')
-        sources=[{'id':x['id'],'locator':x['locator'],'text':x['text'],'revision':x['revision'],'verified':bool(x['verified']),'hash':hashlib.sha256(x['text'].encode()).hexdigest()} for x in blocks]
+        document_ids=[body.document_id,*body.additional_document_ids]
+        if len(set(document_ids))!=len(document_ids):raise HTTPException(422,'同一份资料只能选择一次')
+        documents={key:row(c,'documents',key) for key in document_ids}
+        if any(d['status']!='ready' or d['category'] not in {'standard','textbook'} for d in documents.values()):raise HTTPException(409,'请选择已读取的课标/考纲或教材资料')
+        blocks=[]
+        for key in document_ids:
+            blocks.extend(dict(x) for x in c.execute('SELECT * FROM blocks WHERE document_id=? ORDER BY ordinal',(key,)))
+        if {x['id']:x['revision'] for x in blocks}!=body.source_revisions:raise HTTPException(409,'来源在预览后发生变化，请刷新全部待发送正文后重新确认')
+        if not blocks or not any(x['text'].strip() for x in blocks):raise HTTPException(422,'没有可供模型读取的正文；扫描资料需先补录或OCR核对')
+        if len(blocks)>1000 or sum(len(x['text']) for x in blocks)>90000:raise HTTPException(422,'所选规划资料过大，请缩小资料范围；不会静默截断正文')
+        sources=[{'id':x['id'],'document_id':x['document_id'],'document_name':documents[x['document_id']]['name'],
+                  'category':documents[x['document_id']]['category'],'locator':x['locator'],'text':x['text'],'revision':x['revision'],
+                  'verified':bool(x['verified']),'hash':hashlib.sha256(x['text'].encode()).hexdigest()} for x in blocks]
         unit_id=uid();key=uid()
         c.execute('INSERT INTO knowledge_units(id,title,chapters,target,notes,origin,created_at) VALUES(?,?,?,?,?,?,?)',
             (unit_id,body.title,'[]','初中数学复习内容规划','',packed({'internal_planning':True}),now()))
         snapshot={'schema_version':1,'prompt_version':PROMPT,'title':body.title,'chapters':[],
             'basis':'uploaded_material','official_coverage_verified':False,
-            'planning_task':{'document_id':body.document_id,'document_name':document['name'],'sources':sources,'instruction':body.instruction,'max_topics':body.max_topics}}
+            'planning_task':{'document_id':body.document_id,'document_ids':document_ids,'document_name':document['name'],'sources':sources,'instruction':body.instruction,'max_topics':body.max_topics}}
         c.execute('INSERT INTO knowledge_runs(id,unit_id,input_revision,input_json,model_json,status,stage,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)',
             (key,unit_id,1,packed(snapshot),packed(public_provider(config)),'queued','planning',now(),now()))
         return task_json(c,row(c,'knowledge_runs',key))
@@ -124,6 +135,7 @@ def run_planning(run,config,snapshot):
         'topics':[{'title':'二级主题','source_id':'原内容块id','quote':'支撑主题的连续原文','requirement_keys':['本领域要求代号'],'learning_goals':'本主题对来源要求的拆解建议，非原文'}]}],
         'notes':'分类边界、资料不足及未能安排的内容；没有则空'}
     instruction='''读取上传资料的提取正文，构建初中数学复习内容规划。只规划分类和二级主题，不生成概念正文、例题或答案。
+输入可能包含多份资料：课标/考纲确定学习要求与程度；教材目录补充内容展开、顺序和遗漏线索，不能把目录名称当作课标要求。不能简单取并集或凭目录提高掌握程度。资料有冲突或没有对应要求时，在notes说明。
 优先沿用资料明确的“领域”；据主要内容归类二级主题，避免每个名词都成独立大章，也不能合并得过大。综合实践按项目或问题主题组织。
 不能固定套九类模板，也不能仅按教材章号识别。原文中的换行和制表符可能表示表格行列，请保持领域、主要内容与程度要求的对应。
 每个领域、主题、要求都必须给有效来源id和连续逐字引用，不可伪造或改写引文。requirements只摘录资料实际提供的要求，没有要求返回空数组并说明不足。
@@ -144,7 +156,7 @@ learning_goals是AI对原要求的对应建议，简洁写出对应的学习表�
             nodes.append({'id':node_id,'parent_id':root_id,'kind':'topic','title':topic.title,'source_id':topic.source_id,'source_url':'','included':True,'source_excerpt':topic.quote})
             units.append({'id':unit_id,'title':topic.title,'kind':'foundation','volume':domain.title,'goals':topic.learning_goals,'node_ids':[node_id]})
             for key in topic.requirement_keys: requirement_objects[key]['unit_ids'].append(unit_id)
-    payload={'mode':'ai_curriculum','document_id':meta['document_id'],'nodes':nodes,'units':units,'requirements':requirements,
+    payload={'mode':'ai_curriculum','document_id':meta['document_id'],'document_ids':meta.get('document_ids',[meta['document_id']]),'source_documents':list({x['document_id']:{'id':x['document_id'],'name':x['document_name'],'category':x['category']} for x in meta['sources']}.values()),'nodes':nodes,'units':units,'requirements':requirements,
         'source_revisions':{x['id']:x['revision'] for x in meta['sources']},'source_hashes':{x['id']:x['hash'] for x in meta['sources']},
         'notes':result.notes,'skipped_lines':0,'skipped_entries':[],
         'generation':{'run_id':run['id'],'prompt_version':PROMPT,'basis':'uploaded_material','official_coverage_verified':False},

@@ -167,6 +167,10 @@ def run_one_knowledge():
             from .research_worker import run_research
             run_research(run,config,snapshot)
             return True
+        if snapshot.get('topic_spec_task'):
+            from .topic_specs import run_spec
+            run_spec(run,config,snapshot)
+            return True
         if snapshot.get('planning_task'):
             from .planning_ai import run_planning
             run_planning(run,config,snapshot)

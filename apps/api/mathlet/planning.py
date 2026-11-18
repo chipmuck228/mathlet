@@ -12,6 +12,7 @@ from lxml import etree as ET
 from pydantic import BaseModel, Field
 
 from .db import connect, data_dir, draft_json, now, uid
+from .topic_specs import TopicSpec, validate_spec
 
 router = APIRouter(prefix="/api/plans", tags=["content planning"])
 W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
@@ -101,6 +102,8 @@ def warnings_for(payload):
         messages=['AI提出分类与主题，学习目标对应为建议；引用来自导入资料，不代表已核验教育部原文或全册完整覆盖。']
         if payload.get('unreferenced_sources'): messages.append(f"有 {len(payload['unreferenced_sources'])} 个来源块未被引用，请核对是否为说明、表头或遗漏。")
         if any(not u['goals'].strip() for u in payload['units']): messages.append('部分二级主题尚未填写学习目标对应建议。')
+        missing=sum(not u.get('topic_spec') for u in payload['units'])
+        if missing:messages.append(f'有 {missing} 个主题尚未补充主题规格；本阶段不阻断原有规划确认。')
         return messages
     messages, numbers = [], {}
     for n in payload["nodes"]:
@@ -131,6 +134,14 @@ def plan_json(c, record):
         content_changed = source is not None and (hashlib.sha256(source["text"].encode()).hexdigest() != digest if digest else source["revision"] != revision)
         if source is None or source["document_status"]=="deleted" or content_changed or (key in requirements and not source["verified"]):
             changes.append(key)
+    # For multi-document planning, newly added blocks also change the source set.
+    for doc_id in result['payload'].get('document_ids',[]):
+        for block in c.execute('SELECT id FROM blocks WHERE document_id=?',(doc_id,)):
+            if block['id'] not in result['payload']['source_revisions']:changes.append(block['id'])
+    result['source_locations']={}
+    for key in result['payload']['source_revisions']:
+        source=c.execute('SELECT b.document_id,b.locator,d.name FROM blocks b JOIN documents d ON d.id=b.document_id WHERE b.id=?',(key,)).fetchone()
+        if source:result['source_locations'][key]=dict(source)
     result["stale_sources"] = changes
     result["confirmed"] = result["confirmed_revision"] == result["revision"] and not changes
     result["warnings"] = warnings_for(result["payload"])
@@ -181,6 +192,7 @@ class Unit(BaseModel):
     volume: str = Field(default="", max_length=120)
     goals: str = Field(default="", max_length=5000)
     node_ids: list[str] = Field(max_length=200)
+    topic_spec: TopicSpec | None = None
 
 
 class Requirement(BaseModel):
@@ -253,7 +265,7 @@ def edit_plan(plan_id: str, body: PlanEdit):
         for req in body.requirements:
             source = row(c, "blocks", req.source_id)
             doc = row(c, "documents", source["document_id"])
-            if req.origin=="source_excerpt" and (payload.get("mode")!="ai_curriculum" or source["document_id"]!=payload["document_id"]): raise HTTPException(422,"资料摘要引用只能来自本规划的导入资料")
+            if req.origin=="source_excerpt" and (payload.get("mode")!="ai_curriculum" or source["document_id"] not in payload.get('document_ids',[payload["document_id"]])): raise HTTPException(422,"资料摘要引用只能来自本规划的导入资料")
             if req.origin=="official_excerpt" and (doc["category"] != "standard" or not source["verified"]):
                 raise HTTPException(422, "课标要求必须来自已核对的课标／考纲资料")
             if req.text not in source["text"]:
@@ -262,6 +274,10 @@ def edit_plan(plan_id: str, body: PlanEdit):
                 raise HTTPException(422, "要求关联的单元不存在")
             snapshot[req.source_id] = source["revision"]
             hashes[req.source_id] = hashlib.sha256(source["text"].encode()).hexdigest()
+        for u in body.units:
+            if u.topic_spec is not None:
+                try:validate_spec(c,payload | {'requirements':[r.model_dump() for r in body.requirements],'source_revisions':snapshot},u.id,u.topic_spec)
+                except ValueError as exc:raise HTTPException(422,str(exc)) from None
         payload.update(nodes=[n.model_dump() for n in body.nodes], units=[u.model_dump() for u in body.units],
                        requirements=[r.model_dump() for r in body.requirements], notes=body.notes, source_revisions=snapshot, source_hashes=hashes)
         c.execute("UPDATE plans SET title=?,payload=?,revision=revision+1,confirmed_revision=NULL,reviewer=NULL WHERE id=?",

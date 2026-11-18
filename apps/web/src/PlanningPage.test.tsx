@@ -4,6 +4,7 @@ import PlanningPage from "./PlanningPage"
 import {api} from "@/lib/api"
 vi.mock("@/lib/api",()=>({api:vi.fn(),json:(method:string,body:unknown)=>({method,body:JSON.stringify(body)})}))
 vi.mock('./PlanningAIImport',()=>({default:()=>null}))
+vi.mock('./TopicSpecEditor',()=>({default:()=>null}))
 vi.mock('./EditorialKnowledgePage',()=>({default:({initialUnitId,workflow}:{initialUnitId:string;workflow:boolean})=><p>小节内编制 {initialUnitId} {workflow?'逐步审定':''}</p>}))
 afterEach(()=>{cleanup();vi.mocked(api).mockReset()})
 const plan={id:'p',title:'数学规划',revision:1,confirmed:true,warnings:[],stale_sources:[],reviewer:'老师',draft_links:[],payload:{mode:'ai_curriculum',document_id:'d',notes:'',skipped_lines:0,nodes:[{id:'domain',parent_id:null,kind:'domain',title:'函数',source_id:'b',source_url:'',source_excerpt:'函数',included:true},{id:'topic',parent_id:'domain',kind:'topic',title:'二次函数',source_id:'b',source_url:'',source_excerpt:'二次函数',included:true}],units:[{id:'u',title:'二次函数',volume:'函数',kind:'foundation',goals:'画图与读图',node_ids:['topic']}],requirements:[{id:'req',origin:'source_excerpt',text:'能画图和读图',source_id:'b',unit_ids:['u']}]}}
