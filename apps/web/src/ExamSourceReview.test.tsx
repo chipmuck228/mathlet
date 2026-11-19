@@ -133,3 +133,25 @@ it('warns for unresolved superscripts, missing images and source boundary issues
  expect(screen.getByText('所选题图丢失或不可读取，请重新选择配图。')).toBeTruthy()
  expect(screen.getByText('提取提示：题干续页边界不明确')).toBeTruthy()
 })
+
+it('clears the real historical formula note after repair, save and reopening, without deleting evidence',async()=>{
+ mock();const base=vi.mocked(api).getMockImplementation()!
+ const note='题中有未转换公式占位，需对照原件核对。'
+ let current={...record,payload:{...payload,questions:[{...q,question_text:'求值：【未转换公式，请对照原件并替换】',notes:note}]}}
+ vi.mocked(api).mockImplementation(async(path,init)=>{
+  if(path==='/exam-extractions/e'){
+   if(init?.method==='PUT')current={...current,revision:2,payload:JSON.parse(String(init.body)).body}
+   return structuredClone(current)
+  }
+  return base(path,init)
+ })
+ page();await screen.findByText('提取异常，请对照原文核对');fireEvent.click(screen.getByRole('button',{name:'编辑第1题'}))
+ fireEvent.change(screen.getByLabelText('第1题题目'),{target:{value:'修订后的完整题目'}})
+ expect(screen.queryByText('提取异常，请对照原文核对')).toBeNull()
+ fireEvent.click(screen.getByRole('button',{name:'保存整份修改'}));await screen.findByText('已保存整份提取稿；尚未定稿。')
+ expect(current.payload.questions[0].notes).toBe(note)
+ expect(screen.queryByText(/道题有提取异常/)).toBeNull()
+ cleanup();page();await screen.findByText('修订后的完整题目')
+ expect(screen.queryByText('提取异常，请对照原文核对')).toBeNull()
+ expect(screen.queryByRole('button',{name:'第 1 题，存在提取异常'})).toBeNull()
+})

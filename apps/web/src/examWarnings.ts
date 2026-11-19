@@ -13,7 +13,20 @@ export function examWarnings(q:{question_text:string;notes:string;image_ids:stri
  }
  const note=q.notes?.trim()||''
  if(note.startsWith('提取待核对：')){if(!text.trim())warnings.push(note)}
- else if(/定位|边界|缺失|丢失|不完整|异常|不明确|不确定|重叠|未找到|无法|疑似|待核对|未识别|未转换|识别失败|提取失败|模糊|错位|截断/.test(note))warnings.push('提取提示：'+note)
+ else {
+  // Notes preserve the initial extraction observation. Formula placeholders are
+  // live text diagnostics above, so the old observation must not resurrect a
+  // warning after a teacher repairs the question (including after save/reload).
+  // Split mixed notes: fixing a formula must not hide an independent boundary,
+  // option or image issue recorded in the same sentence.
+  const unresolved=note.split(/[；;\n。，,]|并且|而且|同时|且/).map(s=>s.trim()).filter(Boolean).filter(clause=>{
+   const formulaNote=/(?:未转换|未识别|无法识别|无法转换|转换失败|提取失败|识别失败).*公式|公式.*(?:未转换|未识别|无法识别|无法转换|转换失败|提取失败|识别失败|占位)/.test(clause)
+   const otherProblem=/定位|边界|续页|(?:题干|题目|小问|选项|配图|题图|图形|条件|表格).*(?:缺失|丢失|不完整|不明确|不确定|未找到|模糊|错位|截断)/.test(clause)
+   if(formulaNote&&!otherProblem)return false
+   return /定位|边界|缺失|丢失|不完整|异常|不明确|不确定|重叠|未找到|无法|疑似|待核对|未识别|未转换|识别失败|提取失败|模糊|错位|截断/.test(clause)
+  })
+  if(unresolved.length)warnings.push('提取提示：'+unresolved.join('；'))
+ }
  if(assets&&q.image_ids.some(id=>!assets.some(a=>a.id===id&&a.hash)))warnings.push('所选题图丢失或不可读取，请重新选择配图。')
  return warnings
 }
