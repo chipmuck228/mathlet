@@ -47,9 +47,9 @@ def catalog():
         for entry in c.execute('SELECT e.* FROM corpus_entries e JOIN knowledge_runs k ON k.id=e.run_id ORDER BY k.created_at DESC,e.rowid DESC'):
             run=row(c,'knowledge_runs',entry['run_id']);meta=json.loads(run['input_json'])['research_task']
             finals=[dict(v) for v in c.execute('SELECT v.id,v.created_at FROM research_analysis_versions v JOIN research_outputs o ON o.id=v.output_id WHERE o.run_id=? ORDER BY v.revision DESC',(run['id'],))]
-            output=c.execute('SELECT body FROM research_outputs WHERE run_id=? ORDER BY rowid DESC LIMIT 1',(run['id'],)).fetchone()
+            output=c.execute('SELECT body,checks FROM research_outputs WHERE run_id=? ORDER BY rowid DESC LIMIT 1',(run['id'],)).fetchone()
             body=json.loads(output['body']) if output else {}
-            runs_by_question.setdefault(row(c,'research_question_versions',entry['question_version_id'])['question_id'],[]).append({'id':run['id'],'status':run['status'],'error':run['error'],'revision':run['revision'],'question_version_id':entry['question_version_id'],'problem_types':body.get('problem_types',[]),'identified_names':[x['name'] for x in body.get('identified_knowledge',[])],'stale':not sources_current(c,meta),'finals':[v|{'stale':not analysis_current(c,v['id'])} for v in finals]})
+            runs_by_question.setdefault(row(c,'research_question_versions',entry['question_version_id'])['question_id'],[]).append({'id':run['id'],'status':run['status'],'error':run['error'],'revision':run['revision'],'question_version_id':entry['question_version_id'],'needs_improvement':bool(body.get('missing_information') or (json.loads(output['checks']) if output else [])),'problem_types':body.get('problem_types',[]),'identified_names':[x['name'] for x in body.get('identified_knowledge',[])],'stale':not sources_current(c,meta),'finals':[v|{'stale':not analysis_current(c,v['id'])} for v in finals]})
         for v in c.execute('SELECT v.* FROM exam_document_heads h JOIN exam_extraction_versions v ON v.id=h.version_id ORDER BY v.created_at DESC'):
             f=json.loads(v['snapshot']);stale=not exam_current(c,v['id'])
             exams.append({'id':v['id'],'title':f['title'],'filename':v['filename'],'category':f['source']['category'],'stale':stale,'count':len(f['questions'])})

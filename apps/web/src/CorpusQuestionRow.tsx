@@ -6,14 +6,16 @@ import {QuestionTables,type DataTable} from './QuestionTables'
 import CompleteQuestionEditor from './CompleteQuestionEditor'
 import ResearchManuscriptPage from './ResearchManuscriptPage'
 import type {Question as CompleteQuestion} from './ResearchManuscriptTypes'
-export type CorpusRun={id:string;status:string;revision:number;error:string;stale:boolean;problem_types:string[];identified_names:string[];finals:{id:string;stale:boolean;created_at:string}[]}
+export type CorpusRun={needs_improvement?:boolean;id:string;status:string;revision:number;error:string;stale:boolean;problem_types:string[];identified_names:string[];finals:{id:string;stale:boolean;created_at:string}[]}
 export type CorpusQuestion={tables?:DataTable[];question_id?:string|null;condition_confirmed?:boolean;id:string;exam_id:string;title:string;statement:string;number:string;blockers:string[];duplicate_count:number;runs:CorpusRun[]}
+export const researchStates=[{id:'conditions',label:'待完善条件'},{id:'ready',label:'待研究'},{id:'running',label:'研究中'},{id:'improve',label:'待完善研究'},{id:'review',label:'待审核'},{id:'final',label:'已审定'},{id:'failed',label:'失败／中断'}] as const
 export function questionState(q:CorpusQuestion){
  const runs=q.runs.filter(r=>!r.stale)
  if(q.blockers.length)return {id:'conditions',label:'待完善／确认条件'}
  if(runs.some(r=>['queued','running'].includes(r.status)))return {id:'running',label:'排队／研究中'}
  if(runs.some(r=>r.finals.some(f=>!f.stale)))return {id:'final',label:'研究已审定'}
- if(runs.some(r=>r.status==='completed'))return {id:'review',label:'研究稿待审核'}
+ const latest=runs[0]
+ if(latest?.status==='completed')return latest.needs_improvement?{id:'improve',label:'待完善研究'}:{id:'review',label:'研究稿待审核'}
  if(runs.some(r=>['failed','interrupted'].includes(r.status)))return {id:'failed',label:'研究失败／中断'}
  return {id:'ready',label:'条件已确认，待研究'}
 }

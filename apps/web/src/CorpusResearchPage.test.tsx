@@ -1,10 +1,10 @@
 import {afterEach,expect,it,vi} from 'vitest'
-import {cleanup,fireEvent,render,screen,waitFor,within} from '@testing-library/react'
+import {act,cleanup,fireEvent,render,screen,waitFor,within} from '@testing-library/react'
 import CorpusResearchPage from './CorpusResearchPage'
 import {api} from '@/lib/api'
 vi.mock('@/lib/api',()=>({api:vi.fn(),json:(method:string,body:unknown)=>({method,body:JSON.stringify(body)})}))
 vi.mock('./ReadableMath',()=>({default:({text}:{text:string})=><span>{text}</span>}))
-afterEach(()=>{cleanup();vi.mocked(api).mockReset()})
+afterEach(()=>{cleanup();vi.useRealTimers();vi.mocked(api).mockReset()})
 const run={id:'run',status:'completed',revision:2,error:'',stale:false,problem_types:['数量关系'],identified_names:['等式性质'],finals:[{id:'av',stale:false,created_at:'2026-11-15'}]}
 const catalog={exams:[{id:'ev',title:'合成卷一',filename:'exam-V1.json',category:'exam',count:2,stale:false}],questions:[{id:'ev:q1',exam_id:'ev',title:'合成卷一 · 第1题',number:'1',statement:'已知x=2求x平方',blockers:[],duplicate_count:1,runs:[run]},{id:'ev:q2',exam_id:'ev',title:'合成卷一 · 第2题',number:'2',statement:'有图题',blockers:['必要图形条件待补充'],duplicate_count:1,runs:[]}]}
 const mapping={id:'map',analysis_version_id:'av',revision:1,status:'completed',run_revision:2,error:'',stale:false,read_only:false,payload:{links:[{ref:'kv:k',role:'support',reason:'用于转译条件',evidence:'已知x=2'}],gaps:['缺少乘方知识'],summary:'按实际作用匹配'},knowledge:[{ref:'kv:k',title:'等式性质',unit_title:'一元一次方程'}],finals:[]}
@@ -95,6 +95,10 @@ it('protects unsaved edits in the exact question and offers explicit discard',as
  page();await screen.findByText(/exam-V1.json/);fireEvent.click(screen.getByRole('checkbox',{name:/合成卷一 · exam/}));expand('合成卷一 · 第2题');fireEvent.click(screen.getByRole('button',{name:'补充／编辑本题条件'}))
  const input=await screen.findByLabelText('提取结果 完整题干');fireEvent.change(input,{target:{value:'未保存的条件修订'}})
  await waitFor(()=>expect((screen.getByRole('button',{name:'收起编辑区'}) as HTMLButtonElement).disabled).toBe(true))
+ const reads=vi.mocked(api).mock.calls.filter(([p])=>p==='/corpus/catalog').length
+ fireEvent.focus(window);await act(async()=>{await Promise.resolve()})
+ expect(vi.mocked(api).mock.calls.filter(([p])=>p==='/corpus/catalog')).toHaveLength(reads)
+ expect(screen.getByText(/编辑期间暂停自动刷新/)).toBeTruthy()
  fireEvent.click(screen.getByRole('button',{name:'放弃未保存编辑'}))
  await screen.findByRole('button',{name:'补充／编辑本题条件'})
  expect(vi.mocked(api).mock.calls.some(([,i])=>i?.method==='PUT')).toBe(false)
@@ -131,4 +135,22 @@ it('keeps condition editing available after saving and connects confirmation to 
  await screen.findByRole('button',{name:'打开研究稿／审核定稿'})
  expect(generated).toBe(true)
  expect(screen.queryByRole('checkbox',{name:/选择研究终稿/})).toBeNull()
+})
+
+it('counts each status within selected exams and search, independently of the active status',async()=>{
+ const items=[{...catalog.questions[0],runs:[]},{...catalog.questions[1]},...['running','completed','completed','failed','completed'].map((status,i)=>({...catalog.questions[0],id:'extra'+i,title:'合成额外题'+i,runs:[{...run,status,needs_improvement:i===2,finals:i===4?run.finals:[]}]}))]
+ vi.mocked(api).mockResolvedValue({...catalog,questions:items});page();await screen.findByText(/exam-V1.json/);fireEvent.click(screen.getByRole('checkbox',{name:/合成卷一 · exam/}))
+ for(const name of ['全部状态（7）','待完善条件（1）','待研究（1）','研究中（1）','待审核（1）','待完善研究（1）','失败／中断（1）','已审定（1）'])expect(screen.getByRole('button',{name})).toBeTruthy()
+ fireEvent.click(screen.getByRole('button',{name:'待完善研究（1）'}));expect(screen.getByRole('button',{name:'待完善研究（1）'}).getAttribute('aria-pressed')).toBe('true');expect(screen.getByRole('region',{name:'合成额外题2'})).toBeTruthy();expect(screen.queryByRole('region',{name:catalog.questions[0].title})).toBeNull();expect(screen.getByRole('button',{name:'全部状态（7）'})).toBeTruthy()
+ fireEvent.change(screen.getByLabelText('搜索题库'),{target:{value:'不存在'}});expect(screen.getByRole('button',{name:'全部状态（0）'})).toBeTruthy();expect(screen.getByText('当前筛选下没有题目，可切换状态或调整搜索。')).toBeTruthy()
+})
+it('updates counts and filtered rows automatically when the last running job completes',async()=>{
+ vi.useFakeTimers();let completed=false;vi.mocked(api).mockImplementation(async()=>({...catalog,questions:[{...catalog.questions[0],runs:[{...run,status:completed?'completed':'running',needs_improvement:completed,finals:[]}]}]}));await act(async()=>{page()});fireEvent.click(screen.getByRole('checkbox',{name:/合成卷一 · exam/}));fireEvent.click(screen.getByRole('button',{name:'研究中（1）'}));completed=true
+ await act(async()=>{await vi.advanceTimersByTimeAsync(2500)})
+ expect(screen.getByRole('button',{name:'研究中（0）'})).toBeTruthy();expect(screen.getByRole('button',{name:'待完善研究（1）'})).toBeTruthy();expect(screen.queryByRole('region',{name:catalog.questions[0].title})).toBeNull()
+ fireEvent.click(screen.getByRole('button',{name:'待完善研究（1）'}));expect(screen.getByRole('region',{name:catalog.questions[0].title})).toBeTruthy()
+ completed=false;await act(async()=>{await vi.advanceTimersByTimeAsync(2500)});expect(screen.getByRole('button',{name:'研究中（1）'})).toBeTruthy()
+})
+it('refreshes on window focus even if the previous catalog had no running jobs',async()=>{
+ let running=false;vi.mocked(api).mockImplementation(async()=>({...catalog,questions:[{...catalog.questions[0],runs:running?[{...run,status:'queued',finals:[]}]:[]}]}));page();await screen.findByText(/exam-V1.json/);fireEvent.click(screen.getByRole('checkbox',{name:/合成卷一 · exam/}));expect(screen.getByRole('button',{name:'待研究（1）'})).toBeTruthy();running=true;fireEvent.focus(window);await screen.findByRole('button',{name:'研究中（1）'})
 })

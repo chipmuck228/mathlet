@@ -44,6 +44,8 @@ def test_independent_study_does_not_require_knowledge_and_is_idempotent(client,m
     assert run['knowledge']['items']==[] and len(run['calls'])==3
     assert run['independent_verification']['comparison']['verdict']=='consistent'
     assert run['outputs'][0]['final_version'] is None
+    summary=next(x for x in client.get('/api/corpus/catalog').json()['questions'] if x['id']==q['id'])
+    assert summary['runs'][0]['needs_improvement'] is False
     again=client.post('/api/corpus/studies',json={'question_ids':[q['id']]}).json()
     assert again['results'][0]['run_id']==run['id']
     assert not worker.run_one_knowledge()
@@ -113,6 +115,8 @@ def test_disagreement_is_visible_without_claiming_approval(client,monkeypatch):
     run=client.get('/api/research-editor/runs/'+r['run_id']).json()
     assert run['status']=='completed' and run['outputs'][0]['checks'][0]['category']=='correctness'
     assert run['outputs'][0]['final_version'] is None
+    summary=next(x for x in client.get('/api/corpus/catalog').json()['questions'] if x['id']==q['id'])
+    assert summary['runs'][0]['needs_improvement'] is True
 
 
 def test_cross_exam_cards_and_immutable_card_final(client,monkeypatch):
