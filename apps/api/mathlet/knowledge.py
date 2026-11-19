@@ -44,6 +44,9 @@ def current(c, run):
     if snapshot.get('corpus_task'):
         from .corpus import corpus_current
         return corpus_current(c,snapshot['corpus_task'])
+    if snapshot.get('table_task'):
+        from .exam_tables import table_current
+        return table_current(c,snapshot['table_task'])
     if snapshot.get('formula_task'):
         from .exam_formulas import formula_current
         return formula_current(c,snapshot['formula_task'])

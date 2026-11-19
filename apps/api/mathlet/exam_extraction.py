@@ -15,12 +15,14 @@ from .exam_models import ExamBody,ExamQuestion
 from .research_models import Strict,QuestionBody
 from .research import capture_question
 from .exam_batches import batches
+from .data_tables import checked_tables,docx_tables,table_text
 
 router=APIRouter(prefix='/api',tags=['whole exam extraction'])
 def digest(value):return hashlib.sha256(packed(value).encode()).hexdigest()
 def raw_source(c,document_id):
     doc=row(c,'documents',document_id)
     if doc['status']!='ready':raise HTTPException(409,'资料尚未完成读取')
+    native=docx_tables(data_dir()/'documents'/document_id/'original.docx') if doc['kind']=='docx' else {}
     blocks=[]
     for r in c.execute('SELECT * FROM blocks WHERE document_id=? ORDER BY ordinal',(document_id,)):
         assets=[]
@@ -29,8 +31,14 @@ def raw_source(c,document_id):
             p=data_dir()/'documents'/document_id/'assets'/name
             assets.append({'id':r['id']+'/'+name,'block_id':r['id'],'name':name,'hash':hashlib.sha256(p.read_bytes()).hexdigest() if p.is_file() else None,'url':f'/api/documents/{document_id}/assets/{name}'})
         blocks.append({k:r[k] for k in ['id','ordinal','locator','text']}|{'assets':assets})
-    identity={'document_id':document_id,'original_hash':source_identity(doc),'blocks':blocks}
-    return identity|{'fingerprint':digest(identity),'document_name':doc['name'],'category':doc['category'],'kind':doc['kind']}
+    identity={'document_id':document_id,'original_hash':source_identity(doc),'blocks':[dict(b) for b in blocks]}
+    # Derived structure must not change the original-source fingerprint of existing records.
+    byordinal={r['ordinal']:r for r in c.execute('SELECT ordinal,original_text,text FROM blocks WHERE document_id=?',(document_id,))}
+    for b in blocks:
+        original=byordinal[b['ordinal']]
+        if b['ordinal'] in native and original['text']==original['original_text']:
+            b['native_table']=native[b['ordinal']]|{'key':'source-'+b['id'],'source_block_ids':[b['id']]}
+    return identity|{'fingerprint':digest(identity),'blocks':blocks,'document_name':doc['name'],'category':doc['category'],'kind':doc['kind']}
 def source_current(c,r):
     try:return raw_source(c,r['document_id'])['fingerprint']==json.loads(r['source'])['fingerprint']
     except (HTTPException,OSError):return False
@@ -48,6 +56,9 @@ def validate_body(body,source,final=False):
     for q in value['questions']:
         if q['key'] in keys:raise HTTPException(422,'题目内部编号重复，请重新添加题目')
         keys.add(q['key'])
+        try:q['tables']=checked_tables(q['tables'])
+        except ValueError as exc:raise HTTPException(422,str(exc)) from None
+        if any(not set(t['source_block_ids'])<=blocks for t in q['tables']):raise HTTPException(422,'表格来源不属于本份试卷')
         if value['content_mode']=='questions_only' and (q['answer_text'] or q['answer_spans'] or q['answer_image_ids']):raise HTTPException(422,'本提取稿仅包含题目，不能添加答案字段内容')
         if not set(q['image_ids']+q['answer_image_ids'])<=assets:raise HTTPException(422,'选择的图片不属于本份原文')
         if any(s['block_id'] not in blocks for s in q['question_spans']+q['answer_spans']):raise HTTPException(422,'题目原文定位不属于此文件')
@@ -135,9 +146,9 @@ def publish_questions(c,r,value,assets,version_id):
         has_answer=bool(q['answer_text'].strip() or q['answer_image_ids'])
         title=(value['title']+' · '+(q['number'] or str(len(result)+1)))[:160]
         # QuestionBody has tighter research limits; extraction remains valid even for oversized research candidates.
-        research_ready=len(qblocks)<=30 and len(ablocks)<=30 and len(q['answer_text'])<=8000
+        research_ready=len(qblocks)<=30 and len(ablocks)<=30 and len(q['answer_text'])<=8000 and len(q['question_text'])+len(table_text(q.get('tables',[])))<=24000
         qblocks=qblocks[:30];ablocks=ablocks[:30]
-        qb=QuestionBody(title=title,statement=q['question_text'],question_block_ids=qblocks,answer_block_ids=ablocks if has_answer else [],reference_answer=q['answer_text'][:8000],answer_status='unchecked' if has_answer else 'absent',figure_status='described' if q['diagram_description'].strip() else 'pending' if q['image_ids'] else 'not_needed',diagram_description=q['diagram_description'],number=q['number'],notes='原题整卷提取记录：'+r['id'],selected_assets=[source['document_id']+'/'+assetmap[x]['name'] for x in q['image_ids']])
+        qb=QuestionBody(title=title,statement=q['question_text'],tables=q.get('tables',[]),question_block_ids=qblocks,answer_block_ids=ablocks if has_answer else [],reference_answer=q['answer_text'][:8000],answer_status='unchecked' if has_answer else 'absent',figure_status='described' if q['diagram_description'].strip() else 'pending' if q['image_ids'] else 'not_needed',diagram_description=q['diagram_description'],number=q['number'],notes='原题整卷提取记录：'+r['id'],selected_assets=[source['document_id']+'/'+assetmap[x]['name'] for x in q['image_ids']])
         # Never silently publish a truncated research question as complete.
         if not research_ready:
             result.append(q|{'research_question_id':old['research_question_id'] if old else None,'question_version_id':None,'research_ready':False,'research_note':'内容超过单题研究容量；整题原文完整保存在此提取文件中，请整理后研究'})
@@ -262,11 +273,14 @@ def import_file(document_id:str,body:ImportFile):
                 if match:assetmap[a['id']]=match['id']
         questions=[]
         for q in payload.get('questions',[]):
-            clean={k:q[k] for k in ExamQuestion.model_fields if k in q}
+            clean=json.loads(packed({k:q[k] for k in ExamQuestion.model_fields if k in q}))
             for k in ['image_ids','answer_image_ids']:
                 if any(x not in assetmap for x in clean.get(k,[])):raise HTTPException(422,'导入文件中的配图与当前原文不匹配')
                 clean[k]=[assetmap[x] for x in clean.get(k,[])]
             for k in ['question_spans','answer_spans']:clean[k]=[s|{'block_id':blockmap[s['block_id']]} for s in clean.get(k,[]) if s['block_id'] in blockmap]
+            for table in clean.get('tables',[]):
+                if any(x not in blockmap for x in table.get('source_block_ids',[])):raise HTTPException(422,'导入表格的来源与当前原文不匹配')
+                table['source_block_ids']=[blockmap[x] for x in table.get('source_block_ids',[])]
             questions.append(clean)
         try:value=validate_body({'content_mode':payload.get('content_mode','with_answers'),'title':payload.get('title',''),'questions':questions,'notes':payload.get('notes','')},source)
         except ValueError as exc:raise HTTPException(422,str(exc)) from None
@@ -304,7 +318,7 @@ def open_paper(version_id:str):
         for ordinal,q in enumerate(f['questions']):
             spans=q['question_spans'] or [{'block_id':source['blocks'][0]['id']}]
             has_answer=bool(q.get('answer_text','').strip() or q.get('answer_image_ids',[]))
-            body=PaperItem(title=(f['title']+' · '+(q['number'] or str(ordinal+1)))[:160],number=q['number'],question_spans=spans,answer_spans=q.get('answer_spans',[]) if has_answer else [],asset_ids=q['image_ids'],answer_status='unchecked' if has_answer else 'absent',figure_status='described' if q['diagram_description'].strip() else 'pending' if q['image_ids'] else 'not_needed',diagram_description=q['diagram_description'],boundary_note=q['notes'],statement_override=q['question_text'],answer_override=q.get('answer_text','')).model_dump()
+            body=PaperItem(tables=q.get('tables',[]),title=(f['title']+' · '+(q['number'] or str(ordinal+1)))[:160],number=q['number'],question_spans=spans,answer_spans=q.get('answer_spans',[]) if has_answer else [],asset_ids=q['image_ids'],answer_status='unchecked' if has_answer else 'absent',figure_status='described' if q['diagram_description'].strip() else 'pending' if q['image_ids'] else 'not_needed',diagram_description=q['diagram_description'],boundary_note=q['notes'],statement_override=q['question_text'],answer_override=q.get('answer_text','')).model_dump()
             c.execute('INSERT INTO paper_items(id,project_id,ordinal,payload,original_payload,question_id,question_version_id) VALUES(?,?,?,?,?,?,?)',(uid(),project,ordinal,packed(body),packed(body),q.get('research_question_id'),q.get('question_version_id')))
         c.execute('INSERT INTO exam_extraction_papers VALUES(?,?)',(version_id,project))
         return project_json(c,row(c,'paper_projects',project))

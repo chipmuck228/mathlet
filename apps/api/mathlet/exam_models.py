@@ -3,6 +3,7 @@ from typing import Literal
 from pydantic import Field,model_validator
 from .research_models import Strict
 from .paper_models import Span
+from .data_tables import DataTable
 
 class ExamHint(Strict):
     # A question title is not used by assembly: its text is always sliced from original spans.
@@ -23,6 +24,7 @@ class ExamPlan(Strict):
     questions:list[ExamHint]=Field(min_length=1,max_length=60)
     notes:list[str]=Field(default_factory=list,max_length=20)
 class ExamQuestion(Strict):
+    tables:list[DataTable]=Field(default_factory=list,max_length=10)
     key:str=Field(min_length=1,max_length=80)
     number:str=Field(default='',max_length=80)
     question_text:str=Field(default='',max_length=16000)

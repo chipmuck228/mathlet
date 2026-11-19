@@ -7,12 +7,15 @@ from .db import connect,uid,now
 from .knowledge import row,revision,packed
 from .research_models import Strict
 from .corpus_models import MappingBody
-from .research import sources_current,question_current,version_current,validate_text
+from .research import sources_current,question_current,version_current,validate_text,validate_question_content
 from .model_provider import load_provider,public_provider
 
 router=APIRouter(prefix='/api/corpus',tags=['question-first research'])
 def digest(x):return hashlib.sha256(packed(x).encode()).hexdigest()
-def fingerprint(q):return digest({'text':' '.join(q['statement'].split()),'diagram':' '.join(q.get('diagram_description','').split()),'assets':[a['hash'] for a in q.get('assets',[])]})
+def fingerprint(q):
+    value={'text':' '.join(q['statement'].split()),'diagram':' '.join(q.get('diagram_description','').split()),'assets':[a['hash'] for a in q.get('assets',[])]}
+    if q.get('tables'):value['tables']=[{k:t[k] for k in ['caption','header_rows','rows']} for t in q['tables']]
+    return digest(value)
 
 def queue(c,title,snapshot,config,reserve):
     key=uid();unit=uid();config=config.model_copy(update={'output_token_budget':max(config.output_token_budget,reserve)})
@@ -61,12 +64,12 @@ def catalog():
                     version_id=current_version['id'] if current_version else None
                     if not confirmed_current:blockers.append('题目修改已保存，但尚未确认完整性；请继续确认本题条件')
                     if frozen['figure_status']=='pending':blockers.append('必要图形文字条件尚未核对')
-                    try:validate_text(frozen['statement'])
+                    try:validate_question_content(frozen)
                     except HTTPException as exc:blockers.append(str(exc.detail))
                 else:
                     version_id=None
                     blockers.append(q.get('research_note') or '题目尚未形成可研究的完整版本，请先整理原题')
-                questions.append({'id':v['id']+':'+q['key'],'exam_id':v['id'],'title':f['title']+' · '+(q['number'] or '未编号题'),'number':q['number'],'statement':frozen['statement'] if frozen else q['question_text'],'question_version_id':version_id,'question_id':current['id'] if current else q.get('research_question_id'),'condition_confirmed':confirmed_current,'blockers':blockers,'fingerprint':fingerprint(frozen) if frozen else '', 'runs':runs_by_question.get(current['id'],[]) if current else []})
+                questions.append({'id':v['id']+':'+q['key'],'exam_id':v['id'],'title':f['title']+' · '+(q['number'] or '未编号题'),'number':q['number'],'statement':frozen['statement'] if frozen else q['question_text'],'tables':frozen.get('tables',[]) if frozen else q.get('tables',[]),'question_version_id':version_id,'question_id':current['id'] if current else q.get('research_question_id'),'condition_confirmed':confirmed_current,'blockers':blockers,'fingerprint':fingerprint(frozen) if frozen else '', 'runs':runs_by_question.get(current['id'],[]) if current else []})
         counts={}
         for q in questions:
             if q['fingerprint']:counts[q['fingerprint']]=counts.get(q['fingerprint'],0)+1

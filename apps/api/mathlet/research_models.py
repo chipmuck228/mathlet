@@ -61,7 +61,10 @@ class SourceRange(Strict):
     start:int=Field(ge=0)
     end:int=Field(ge=1)
 
+from .data_tables import DataTable
+
 class QuestionBody(Strict):
+    tables:list[DataTable]=Field(default_factory=list,max_length=10)
     title:str=Field(min_length=1,max_length=160)
     question_block_ids:list[str]=Field(min_length=1,max_length=30)
     answer_block_ids:list[str]=Field(default_factory=list,max_length=30)

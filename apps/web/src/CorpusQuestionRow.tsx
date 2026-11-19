@@ -2,11 +2,12 @@ import {useCallback,useEffect,useId,useRef,useState} from 'react'
 import {api,type Document} from '@/lib/api'
 import {Button} from '@/components/ui/button'
 import ReadableMath from './ReadableMath'
+import {QuestionTables,type DataTable} from './QuestionTables'
 import CompleteQuestionEditor from './CompleteQuestionEditor'
 import ResearchManuscriptPage from './ResearchManuscriptPage'
 import type {Question as CompleteQuestion} from './ResearchManuscriptTypes'
 export type CorpusRun={id:string;status:string;revision:number;error:string;stale:boolean;problem_types:string[];identified_names:string[];finals:{id:string;stale:boolean;created_at:string}[]}
-export type CorpusQuestion={question_id?:string|null;condition_confirmed?:boolean;id:string;exam_id:string;title:string;statement:string;number:string;blockers:string[];duplicate_count:number;runs:CorpusRun[]}
+export type CorpusQuestion={tables?:DataTable[];question_id?:string|null;condition_confirmed?:boolean;id:string;exam_id:string;title:string;statement:string;number:string;blockers:string[];duplicate_count:number;runs:CorpusRun[]}
 export function questionState(q:CorpusQuestion){
  const runs=q.runs.filter(r=>!r.stale)
  if(q.blockers.length)return {id:'conditions',label:'待完善／确认条件'}
@@ -39,7 +40,7 @@ export default function CorpusQuestionRow({question:q,selected,finals,showFinalS
  <div className="section-heading"><label className="checkline"><input type="checkbox" aria-label={'研究 '+q.title} disabled={locked||dirty||!!q.blockers.length&&!selected} checked={selected} onChange={e=>onSelect(e.target.checked)}/><strong>{q.title}</strong></label><span className="corpus-state-label">{status.label}</span><Button variant="outline" aria-expanded={expanded} aria-controls={id} disabled={locked||dirty} onClick={()=>setExpanded(!expanded)}>{expanded?'折叠题目':'展开题目'}</Button></div>
  <p className="small muted">{q.runs.length} 份研究记录 · {q.runs.flatMap(r=>r.finals).length} 份研究终稿</p>
  <div id={id} hidden={!expanded}>
- <ReadableMath text={q.statement}/>{q.duplicate_count>1&&<p className="small muted">有 {q.duplicate_count} 份相同内容候选，保留各自来源；不自动合并。</p>}
+ <ReadableMath text={q.statement}/><QuestionTables tables={q.tables}/>{q.duplicate_count>1&&<p className="small muted">有 {q.duplicate_count} 份相同内容候选，保留各自来源；不自动合并。</p>}
  {q.blockers.map((b,i)=><p role="alert" key={i}>{b}</p>)}
  <div className="actions"><Button variant="outline" disabled={locked||dirty||!q.question_id} onClick={()=>void editConditions()}>补充／编辑本题条件</Button><Button disabled={locked||dirty||!!q.blockers.length} onClick={()=>void generate()}>{q.runs.some(r=>!r.stale)?'生成／复用本题研究稿':'生成本题研究稿'}</Button></div>
  {!q.blockers.length&&!q.runs.some(r=>!r.stale)&&<p className="small muted">条件已确认；请生成本题研究稿，再核验解答并形成研究终稿。</p>}

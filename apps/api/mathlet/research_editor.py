@@ -40,6 +40,7 @@ def analysis_schema(meta):
 def safe_question(frozen):
     """Only reviewed question text, never original mixed blocks, image bytes, or unchecked answers."""
     result={k:frozen[k] for k in ['title','statement','answer_status','figure_status','diagram_description','region','year','number']}
+    if frozen.get('tables'):result['tables']=frozen['tables']
     result['source_info']=[{k:x[k] for k in ['document_name','category','locator']} for x in frozen['sources'] if x['id'] in frozen['question_block_ids']]
     if frozen['answer_status']=='verified':
         result['reference_answer']=frozen['reference_answer']

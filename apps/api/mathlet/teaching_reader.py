@@ -2,6 +2,7 @@
 import html
 from .formulas import render_text,render_latex
 from .teaching import PHASE_NAMES
+from .data_tables import table_html,TABLE_CSS
 
 def render_reader(snapshot):
     body=snapshot['body'];know=snapshot['knowledge'];questions={q['version_id']:q for q in snapshot['questions']}
@@ -9,7 +10,7 @@ def render_reader(snapshot):
     names={x['ref']:x['title'] for x in know['items']}
     def text(s):return '<div class="text">'+render_text(s)+'</div>'
     def link(ref):return '<a href="#'+anchors[ref]+'">'+html.escape(names[ref])+'</a>'
-    parts=['<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>'+html.escape(body['title'])+'</title><style>body{max-width:800px;margin:40px auto;padding:0 22px;color:#26332c;background:#fffdf8;font:17px/1.9 system-ui,sans-serif}h1{font-size:28px}h2{margin-top:42px;border-bottom:1px solid #ccd2c7;padding-bottom:8px}h3{font-size:19px}a{color:#325c43}.text{white-space:pre-wrap;margin:10px 0}blockquote{border-left:3px solid #afc2a8;padding-left:18px;margin-left:0}details{margin:16px 0;border-top:1px solid #ddd;padding:10px 0}summary{cursor:pointer;color:#365c40}img{max-width:100%;max-height:400px}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ccc;padding:8px;text-align:left}math{max-width:100%;overflow:auto}small{color:#667366}@media print{body{background:white;margin:0;max-width:none}h2{break-before:page}details> :not(summary){display:block!important}summary{display:block}a{color:inherit}details::details-content{content-visibility:visible!important;height:auto!important}img{max-height:260px}article{break-inside:auto}}</style><header><small>Mathlet · '+('经教师审定的小节读物' if snapshot['teacher_confirmed'] else '未审定草稿，仅供核查')+'</small><h1>'+html.escape(body['title'])+'</h1><p>先理解基础知识，再尝试思路训练，最后对照完整解析。提示按需要逐层打开。打印时展开的正文与答案一起保留。</p></header><h2>一、基本知识</h2>']
+    parts=['<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>'+html.escape(body['title'])+'</title><style>body{max-width:800px;margin:40px auto;padding:0 22px;color:#26332c;background:#fffdf8;font:17px/1.9 system-ui,sans-serif}h1{font-size:28px}h2{margin-top:42px;border-bottom:1px solid #ccd2c7;padding-bottom:8px}h3{font-size:19px}a{color:#325c43}.text{white-space:pre-wrap;margin:10px 0}blockquote{border-left:3px solid #afc2a8;padding-left:18px;margin-left:0}details{margin:16px 0;border-top:1px solid #ddd;padding:10px 0}summary{cursor:pointer;color:#365c40}img{max-width:100%;max-height:400px}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ccc;padding:8px;text-align:left}math{max-width:100%;overflow:auto}small{color:#667366}@media print{body{background:white;margin:0;max-width:none}h2{break-before:page}details> :not(summary){display:block!important}summary{display:block}a{color:inherit}details::details-content{content-visibility:visible!important;height:auto!important}img{max-height:260px}article{break-inside:auto}}'+TABLE_CSS+'</style><header><small>Mathlet · '+('经教师审定的小节读物' if snapshot['teacher_confirmed'] else '未审定草稿，仅供核查')+'</small><h1>'+html.escape(body['title'])+'</h1><p>先理解基础知识，再尝试思路训练，最后对照完整解析。提示按需要逐层打开。打印时展开的正文与答案一起保留。</p></header><h2>一、基本知识</h2>']
     for i,k in enumerate(know['items']):
         b=k['body'];parts.append('<article id="'+anchors[k['ref']]+'"><h3>B'+str(i+1)+' '+html.escape(k['title'])+'</h3>'+text(b['statement'])+'<strong>成立条件</strong>'+text(b['conditions']))
         if b.get('formula'):parts.append('<div>'+render_latex(b['formula'])+'</div>')
@@ -23,7 +24,7 @@ def render_reader(snapshot):
             if source in names and target in names:parts.append('<p>'+link(source)+' → '+link(target)+'</p>'+text(e['reason'])+'<strong>条件</strong>'+text(e['conditions']))
     for index,c in enumerate(body['cases']):
         if c['relevance'] not in {'primary','combined','optional'}:continue
-        q=questions[c['question_version_id']];parts.append('<h2>二、代表题 '+str(index+1)+' · '+html.escape(q['title'])+'</h2>'+text(q['statement']))
+        q=questions[c['question_version_id']];parts.append('<h2>二、代表题 '+str(index+1)+' · '+html.escape(q['title'])+'</h2>'+text(q['statement'])+table_html(q.get('tables',[])))
         for a in q['assets']:
             if a.get('data_url','').startswith('data:image/png;base64,'):parts.append('<img alt="原题配图" src="'+html.escape(a['data_url'],quote=True)+'">')
         if q['diagram_description']:parts.append('<p>图形条件：</p>'+text(q['diagram_description']))

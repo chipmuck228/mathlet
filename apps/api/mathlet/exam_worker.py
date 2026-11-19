@@ -9,6 +9,7 @@ from .knowledge import row,packed
 from .exam_models import ExamPlan,ExamBody
 from .exam_extraction import exam_task_current
 from .paper_research import resolve,locate
+from .data_tables import tabular_text
 
 def run_exam(run,config,snapshot):
     from .knowledge_worker import call
@@ -95,7 +96,17 @@ asset_ids只选择题目图，不选择解答图，可从本文件所有图片�
         if q.get('location_issue'):
             resolved['statement']=''
             q['boundary_note']='提取待核对：本题定位经AI复查仍无法确认，请对照原文补全题目，或移除此题。'+q['location_issue']
-        questions.append({'key':uid(),'number':q['number'],'question_text':resolved['statement'],'answer_text':'','image_ids':q['asset_ids'],'answer_image_ids':[],'diagram_description':'','question_spans':q['question_spans'],'answer_spans':[],'notes':'；'.join([q['boundary_note'],*resolved['errors']]).strip('；')[:3000]})
+        tables=[];text=resolved['statement']
+        if not q.get('location_issue'):
+            for span in q['question_spans']:
+                b=originals[span['block_id']]
+                native=b.get('native_table')
+                if native and len(tables)<10 and text.count(b['text'])==1:
+                    remaining=text.replace(b['text'],'',1).strip()
+                    if remaining:
+                        text=remaining;tables.append(native)
+            if not tables:text,tables=tabular_text(text)
+        questions.append({'key':uid(),'number':q['number'],'question_text':text,'tables':tables,'answer_text':'','image_ids':q['asset_ids'],'answer_image_ids':[],'diagram_description':'','question_spans':q['question_spans'],'answer_spans':[],'notes':'；'.join([q['boundary_note'],*resolved['errors']]).strip('；')[:3000]})
     value=ExamBody(content_mode='questions_only',title=title,questions=questions,notes='\n'.join(notes)).model_dump()
     with connect() as c:
         c.execute('BEGIN IMMEDIATE')

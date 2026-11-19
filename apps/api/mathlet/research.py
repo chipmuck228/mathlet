@@ -9,6 +9,7 @@ from fastapi.responses import Response
 from pydantic import Field
 from .db import connect,now,uid,data_dir
 from .knowledge import row,revision,packed
+from .data_tables import table_text
 from .research_models import Strict,QuestionBody,Relation,Analysis
 from .model_provider import load_provider,public_provider
 from .formulas import parts_from_text,render_latex
@@ -75,6 +76,12 @@ def validate_text(text):
     except ValueError as exc:raise HTTPException(422,str(exc)) from None
 
 
+def validate_question_content(question):
+    validate_text(question['statement']);validate_text(question.get('diagram_description',''))
+    for table in question.get('tables',[]):
+        for cells in table['rows']:
+            for cell in cells:validate_text(cell)
+
 def capture_question(c,body):
     ids=body.question_block_ids+body.answer_block_ids
     if len(set(body.question_block_ids))!=len(body.question_block_ids) or len(set(body.answer_block_ids))!=len(body.answer_block_ids):raise HTTPException(422,'同一角色的来源块不可重复')
@@ -103,7 +110,13 @@ def capture_question(c,body):
         if any(not x['verified'] for x in sources if x['id'] in body.answer_block_ids):raise HTTPException(422,'参考答案来源块尚未核对，请先核对或保留为未核对')
     if body.answer_status=='absent' and (body.answer_block_ids or body.reference_answer.strip()):raise HTTPException(422,'已有答案内容时请选择未核对或已核对状态')
     basis='verified_source_blocks' if body.answer_status=='verified' and body.answer_block_ids else 'teacher_transcription' if body.answer_status=='verified' else 'unreviewed' if body.answer_status=='unchecked' else 'unavailable'
-    return body.model_dump()|{'sources':sources,'assets':assets,'reference_answer_basis':basis}
+    from .data_tables import checked_tables
+    try:tables=checked_tables([t.model_dump() for t in body.tables])
+    except ValueError as exc:raise HTTPException(422,str(exc)) from None
+    if any(not set(t['source_block_ids'])<=set(body.question_block_ids) for t in tables):raise HTTPException(422,'表格来源不属于本题题干')
+    payload=body.model_dump()
+    if not tables:payload.pop('tables',None)
+    return payload|{'sources':sources,'assets':assets,'reference_answer_basis':basis}
 
 
 @router.get('/knowledge-versions')
@@ -172,6 +185,9 @@ def confirm_question(question_id:str,body:Confirm):
         if not question_current(c,question):raise HTTPException(409,'来源已修改，请重新保存并核对题目')
         if question['confirmed_revision']==question['revision'] and c.execute('SELECT 1 FROM research_question_versions WHERE question_id=? AND revision=?',(question_id,question['revision'])).fetchone():return question_json(c,question)
         payload=json.loads(question['payload']);validate_text(payload['statement']);validate_text(payload['diagram_description'])
+        for table in payload.get('tables',[]):
+            for cells in table['rows']:
+                for cell in cells:validate_text(cell)
         if payload['answer_status']=='verified':validate_text(payload['reference_answer'])
         if payload['figure_status']=='pending':raise HTTPException(422,'配图尚待核对，不能确认完整题目')
         if payload['assets'] and payload['figure_status']=='not_needed' and not payload['diagram_description'].strip():raise HTTPException(422,'题目附有图片，请描述必要图形条件，或说明图片为何不影响本题')
@@ -221,7 +237,7 @@ def start(body:Start):
         if not sources_current(c,meta):raise HTTPException(409,'知识、关系或题目版本已过期，请重新核对并选择')
         if body.question_version_id:
             frozen=json.loads(row(c,'research_question_versions',body.question_version_id)['snapshot'])
-            if len(frozen['statement'])+len(frozen['diagram_description'])+len(frozen['reference_answer'])>24000:raise HTTPException(422,'题目文字超出研究范围，请拆分题目包')
+            if len(frozen['statement'])+len(frozen['diagram_description'])+len(frozen['reference_answer'])+len(table_text(frozen.get('tables',[])))>24000:raise HTTPException(422,'题目文字超出研究范围，请拆分题目包')
         key=uid();unit_id=uid();snapshot={'schema_version':1,'prompt_version':'research-v1','title':context['title'],'chapters':[],'research_task':meta}
         c.execute('INSERT INTO knowledge_units(id,title,chapters,target,notes,origin,created_at) VALUES(?,?,?,?,?,?,?)',(unit_id,context['title'],'[]','单题研究','',packed({'internal_research':True}),now()))
         c.execute('INSERT INTO knowledge_runs(id,unit_id,input_revision,input_json,model_json,status,stage,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)',(key,unit_id,1,packed(snapshot),packed(public_provider(config)),'queued','research',now(),now()))

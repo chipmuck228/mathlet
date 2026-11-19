@@ -1,9 +1,9 @@
 // Evidence of extraction problems only; do not guess whether the mathematics is correct.
 const markerPattern=String.raw`【[^】\n]*(?:未转换公式|未识别公式|无法识别公式|无法转换公式|公式[^】\n]*(?:未转换|未识别|转换失败|提取失败|识别失败)|superscript|subscript|请合并核对)[^】\n]*】|\uFFFD+`
 export function extractionMarkers(text:string){return [...text.matchAll(new RegExp(markerPattern,'g'))]}
-export function examWarnings(q:{question_text:string;notes:string;image_ids:string[]},assets?:{id:string;hash:string|null}[]):string[]{
- const text=q.question_text;const warnings:string[]=[]
- if(!text.trim())warnings.push('题目正文为空，请对照原文补全。')
+export function examWarnings(q:{question_text:string;notes:string;image_ids:string[];tables?:{rows:string[][]}[]},assets?:{id:string;hash:string|null}[]):string[]{
+ const text=[q.question_text,...(q.tables||[]).flatMap(t=>t.rows.flat())].join('\n');const warnings:string[]=[]
+ if(!q.question_text.trim())warnings.push('题目正文为空，请对照原文补全。')
  const matches=extractionMarkers(text)
  if(matches.some(m=>/公式/.test(m[0])))warnings.push('含未转换或未识别的公式，请对照原件替换。')
  if(matches.some(m=>/superscript|subscript|请合并核对/.test(m[0])))warnings.push('含尚未合并的上下标，请核对公式结构。')
@@ -12,7 +12,7 @@ export function examWarnings(q:{question_text:string;notes:string;image_ids:stri
   if(text.split(start).length!==text.split(end).length){warnings.push('公式起止标记不配对，请检查公式是否提取完整。');break}
  }
  const note=q.notes?.trim()||''
- if(note.startsWith('提取待核对：')){if(!text.trim())warnings.push(note)}
+ if(note.startsWith('提取待核对：')){if(!q.question_text.trim())warnings.push(note)}
  else {
   // Notes preserve the initial extraction observation. Formula placeholders are
   // live text diagnostics above, so the old observation must not resurrect a

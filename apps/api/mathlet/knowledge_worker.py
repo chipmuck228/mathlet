@@ -150,6 +150,10 @@ def run_one_knowledge():
             from .corpus_worker import run_independent
             run_independent(run,config,snapshot)
             return True
+        if snapshot.get('table_task'):
+            from .exam_tables import run_table
+            run_table(run,config,snapshot)
+            return True
         if snapshot.get('formula_task'):
             from .exam_formulas import run_formula
             run_formula(run,config,snapshot)

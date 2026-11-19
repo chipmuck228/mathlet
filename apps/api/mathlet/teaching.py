@@ -11,6 +11,7 @@ from .research import version_current,question_current,sources_current,validate_
 from .research_models import Strict
 from .research_editor import safe_question
 from .teaching_models import TeachingBody,TeachingCase
+from .data_tables import table_text
 
 router=APIRouter(prefix='/api/teaching',tags=['section application and training'])
 PHASES=['read','relate','plan','solve','check']
@@ -50,7 +51,7 @@ def check_case(body,question,know,final=False):
         if m['id'] in ids:raise ValueError('应用映射编号重复')
         ids.add(m['id']);used.add(m['knowledge_ref'])
         if m['knowledge_ref'] not in refs:raise ValueError('应用映射引用了终稿外的知识')
-        if m['quote'] not in question['statement'] and m['quote'] not in question['diagram_description']:raise ValueError('应用映射的题目片段不是题干或图形条件中的逐字原文')
+        if m['quote'] not in question['statement'] and m['quote'] not in question['diagram_description'] and m['quote'] not in table_text(question.get('tables',[])):raise ValueError('应用映射的题目片段不是题干或图形条件中的逐字原文')
         a=approaches.get(m['approach_id'])
         if not a or m['step_index']>=len(a['steps']):raise ValueError('应用映射引用不存在的解法或推理步骤（步骤从0编号）')
         if m['knowledge_ref'] not in a['steps'][m['step_index']]['knowledge_refs']:raise ValueError('映射知识未出现在所引用的推理步骤中')

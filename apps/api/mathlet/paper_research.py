@@ -244,7 +244,7 @@ def question_body(p,item):
     if r['errors']:raise HTTPException(422,'；'.join(r['errors']))
     qids=list(dict.fromkeys([x['block_id'] for x in body['question_spans']]+[a['block_id'] for a in r['assets']]))
     try:
-        return QuestionBody(title=body['title'],statement=r['statement'],question_block_ids=qids,answer_block_ids=list(dict.fromkeys(x['block_id'] for x in body['answer_spans'])),reference_answer=r['reference_answer'],answer_status=body['answer_status'],figure_status=body['figure_status'],diagram_description=body['diagram_description'],region=body['region'],year=body['year'],number=body['number'],notes='整卷分题：'+p['id'],selected_assets=[p['document_id']+'/'+a['name'] for a in r['assets']],source_ranges=[{k:x[k] for k in ['block_id','role','start','end']} for x in r['ranges']])
+        return QuestionBody(title=body['title'],statement=r['statement'],tables=body.get('tables',[]),question_block_ids=qids,answer_block_ids=list(dict.fromkeys(x['block_id'] for x in body['answer_spans'])),reference_answer=r['reference_answer'],answer_status=body['answer_status'],figure_status=body['figure_status'],diagram_description=body['diagram_description'],region=body['region'],year=body['year'],number=body['number'],notes='整卷分题：'+p['id'],selected_assets=[p['document_id']+'/'+a['name'] for a in r['assets']],source_ranges=[{k:x[k] for k in ['block_id','role','start','end']} for x in r['ranges']])
     except ValueError as exc:raise HTTPException(422,'完整题目超出大小或结构限制：'+str(exc)) from None
 class ConfirmItem(Rev):item_revision:int;confirmed:bool
 @router.post('/{project_id}/items/{item_id}/confirm')

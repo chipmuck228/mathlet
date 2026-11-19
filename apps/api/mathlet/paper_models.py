@@ -2,6 +2,7 @@
 from typing import Literal
 from pydantic import Field
 from .research_models import Strict
+from .data_tables import DataTable
 
 class Span(Strict):
     block_id:str
@@ -14,6 +15,7 @@ class Recommendation(Strict):
     reason:str=Field(min_length=1,max_length=1200)
     evidence:str=Field(default='',max_length=500)
 class PaperItem(Strict):
+    tables:list[DataTable]=Field(default_factory=list,max_length=10)
     statement_override:str|None=Field(default=None,max_length=16000)
     answer_override:str|None=Field(default=None,max_length=16000)
     title:str=Field(min_length=1,max_length=160)

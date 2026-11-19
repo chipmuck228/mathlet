@@ -4,7 +4,7 @@ from fastapi import APIRouter,HTTPException
 from fastapi.responses import Response
 from .db import now,connect
 from .knowledge import row,packed
-from .research import question_current,question_json,validate_text
+from .research import question_current,question_json,validate_text,validate_question_content
 
 router=APIRouter(prefix='/api/corpus',tags=['structured question bank'])
 
@@ -52,6 +52,7 @@ def build(c,key):
     question=json.loads(qv['snapshot']) if qv else json.loads(current['payload'])
     fields=['title','statement','diagram_description','figure_status','region','year','number']
     safe={k:question.get(k,'') for k in fields}
+    if question.get('tables'):safe['tables']=question['tables']
     safe['assets']=question.get('assets',[])
     safe['reference_answer']=question.get('reference_answer','') if question.get('answer_status')=='verified' else ''
     safe['answer_status']=question.get('answer_status','absent')
@@ -62,7 +63,7 @@ def build(c,key):
     blockers=[]
     if not current_info['confirmed']:blockers.append('完整题目条件或来源需要重新确认')
     if question.get('figure_status')=='pending':blockers.append('必要图形文字条件尚未核对')
-    try:validate_text(question['statement'])
+    try:validate_question_content(question)
     except HTTPException as exc:blockers.append(str(exc.detail))
     studies=[];types=set();names=set();units=set();mapping_versions=[]
     for entry in c.execute('SELECT * FROM question_bank_studies WHERE question_id=? ORDER BY created_at DESC, rowid DESC',(key,)):
