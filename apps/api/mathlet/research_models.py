@@ -25,11 +25,15 @@ class Step(Strict):
     action:str=Field(min_length=1,max_length=2500)
     reason:str=Field(min_length=1,max_length=2000)
     knowledge_refs:list[str]=Field(max_length=12)
+# Shared by independent solving, teacher editing and finalized research.
+MAX_APPROACH_STEPS=60
+STEP_GUIDANCE=f'每条解法最多{MAX_APPROACH_STEPS}步；按小问和必要推理组织，逐步保留依据、分类、端点与检验，不为压缩步数省略条件或关键推理，也不把同一计算机械拆碎。'
+
 class Approach(Strict):
     id:str=Field(min_length=1,max_length=80)
     title:str=Field(min_length=1,max_length=300)
     trigger:str=Field(min_length=1,max_length=2000)
-    steps:list[Step]=Field(min_length=1,max_length=10)
+    steps:list[Step]=Field(min_length=1,max_length=MAX_APPROACH_STEPS)
     conclusion:str=Field(min_length=1,max_length=3000)
     checks:str=Field(min_length=1,max_length=2500)
     limitations:str=Field(max_length=2000)

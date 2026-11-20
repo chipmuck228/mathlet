@@ -1,7 +1,7 @@
 """Knowledge-to-problem mappings and progressive training are teacher-reviewed proposals."""
 from typing import Literal
 from pydantic import Field
-from .research_models import Strict,AuthoringAnalysis
+from .research_models import Strict,AuthoringAnalysis,MAX_APPROACH_STEPS
 
 class Application(Strict):
     id:str=Field(min_length=1,max_length=80)
@@ -11,7 +11,7 @@ class Application(Strict):
     operation:str=Field(min_length=1,max_length=2000)
     conditions:str=Field(min_length=1,max_length=1500)
     approach_id:str
-    step_index:int=Field(ge=0,le=9)
+    step_index:int=Field(ge=0,lt=MAX_APPROACH_STEPS)
 class Exercise(Strict):
     phase:Literal['read','relate','plan','solve','check']
     prompt:str=Field(min_length=1,max_length=2500)
